@@ -22,9 +22,9 @@ public enum TextureType
 public class Material : IDisposable
 {
     private readonly GL _gl;
-    private readonly ShaderProgram _shader;
     private readonly Dictionary<TextureType, Texture2D> _textures = new();
     private bool _disposed = false;
+    public ShaderProgram Shader { get; private set; }
     
     // 纹理缺失时的默认属性
     public Vector4 BaseColor { get; set; } = new Vector4(1f, 1f, 1f, 1f);
@@ -34,7 +34,7 @@ public class Material : IDisposable
     public Material(ShaderProgram shader)
     {
         _gl = shader._gl;
-        _shader = shader;
+        Shader = shader;
     }
     
     /// <summary>
@@ -55,7 +55,7 @@ public class Material : IDisposable
     /// </summary>
     public void Apply()
     {
-        _shader.Use();
+        Shader.Use();
 
         // 绑定纹理并传递 uniform
         int unit = 0;
@@ -64,9 +64,9 @@ public class Material : IDisposable
             var texUnit = (TextureUnit)(TextureUnit.Texture0 + unit);
             kv.Value.Bind(texUnit);
             string uniformName = GetUniformName(kv.Key);
-            _shader.SetUniform(uniformName, unit);
+            Shader.SetUniform(uniformName, unit);
             // 告诉着色器这张纹理存在（1 存在，0 缺失）
-            _shader.SetUniform($"uHas{uniformName.Substring(1)}", 1);
+            Shader.SetUniform($"uHas{uniformName.Substring(1)}", 1);
             unit++;
         }
 
@@ -76,14 +76,14 @@ public class Material : IDisposable
             if (!_textures.ContainsKey(type))
             {
                 string uniformName = GetUniformName(type);
-                _shader.SetUniform($"uHas{uniformName.Substring(1)}", 0);
+                Shader.SetUniform($"uHas{uniformName.Substring(1)}", 0);
             }
         }
 
         // 传递后备值
-        _shader.SetUniform("uBaseColor", BaseColor);
-        _shader.SetUniform("uMetallicFactor", MetallicFactor);
-        _shader.SetUniform("uRoughnessFactor", RoughnessFactor);
+        Shader.SetUniform("uBaseColor", BaseColor);
+        Shader.SetUniform("uMetallicFactor", MetallicFactor);
+        Shader.SetUniform("uRoughnessFactor", RoughnessFactor);
     }
     
     private string GetUniformName(TextureType type) => type switch

@@ -1,5 +1,7 @@
 using Silk.NET.OpenGL;
 using System.Numerics;
+using System.IO;
+using System.Text;
 
 namespace RobotSimulation.Core.Rendering;
 
@@ -74,6 +76,10 @@ public class ShaderProgram : IDisposable
     public void SetUniform(string name, Matrix4x4 value)
     {
         int loc = _gl.GetUniformLocation(_handle, name);
+        // 保持 transpose = false：
+        // System.Numerics.Matrix4x4 采用行主序存储 + 行向量约定（v' = v·M）。
+        // 以 false 直接传入时，GLSL 将行主序解释为列主序，得到 M^T；
+        // 列向量变换 M^T·p 与行向量变换 p·M 结果一致，几何与法线矩阵自洽。
         if (loc != -1) unsafe { _gl.UniformMatrix4(loc, 1, false, (float*)&value); }
     }
     

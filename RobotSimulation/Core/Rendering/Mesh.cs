@@ -20,7 +20,7 @@ public class Mesh : IDisposable
         
         // 创建 vao
         _vao = gl.GenVertexArray();
-        _vbo = gl.GenBuffer();
+        gl.BindVertexArray(_vao);
         
         // 创建 vbo
         _vbo =  gl.GenBuffer();

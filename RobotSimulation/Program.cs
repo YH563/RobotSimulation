@@ -3,196 +3,195 @@ using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using Silk.NET.OpenGL;
 using System.Drawing;
-using StbImageSharp;
+using System.Numerics;
+using RobotSimulation.Core.Rendering;
+using RobotSimulation.Core.Scene;
+using RobotSimulation.Core.Utils;
 
 namespace RobotSimulation;
 
 public class Program
 {
     private static IWindow _window;
-    private static GL _gl;
-    private static uint _vao;  // 顶点数组对象，配置单
-    private static uint _vbo;  // 顶点缓冲对象，仓库
-    private static uint _ebo;  // 元素缓冲对象（索引缓冲对象 IBO）
-    private static uint _program;  // 着色器编译得到的程序
-    private static uint _texture;  // 纹理
-    
+    private static GraphicsContext _graphics;
+    private static Scene _scene;
+    private static GameTimer _gameTimer;
+    private static Vector2 _lastMousePos;
+    private static bool _isDragging = false;
+
     public static void Main(string[] args)
     {
-        // 创建窗口选项
-        WindowOptions options = WindowOptions.Default with
+        try
         {
-            Size = new Vector2D<int>(800, 600),
-            Title = "My first Silk.NET application!",
-            VSync = true
+            var options = WindowOptions.Default with
+            {
+                Size = new Vector2D<int>(1200, 800),
+                Title = "Robot Simulation - Basic Cube",
+                VSync = true
+            };
+            _window = Window.Create(options);
+            _window.Load += OnLoad;
+            _window.Render += OnRender;
+            _window.Closing += OnClosing;
+            _window.Resize += OnResize;
+            _window.Run();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Unhandled exception: {ex}");
+            Console.ReadLine();
+        }
+    }
+
+    private static void OnLoad()
+    {
+        GL gl = _window.CreateOpenGL();
+        _graphics = new GraphicsContext(gl);
+        _scene = new Scene();
+
+        _graphics.Resized += (w, h) => _scene.Camera.AspectRatio = w / (float)h;
+        _graphics.Resize(_window.Size.X, _window.Size.Y);
+
+        _scene.LightPosition = new Vector3(5, 8, 5);
+        _scene.LightColor = new Vector3(1, 1, 1);
+
+        var shader = _graphics.ShaderCache.GetOrCreate(
+            "Assets/Shaders/Model/Standard.vert",
+            "Assets/Shaders/Model/Standard.frag"
+        );
+
+        Mesh cubeMesh = CreateCubeMesh(gl);
+        var material = new Material(shader);
+        material.BaseColor = new Vector4(0.9f, 0.15f, 0.15f, 1.0f); // 红色立方体
+
+        var cube = new GameObject(cubeMesh, material);
+        cube.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 30f * MathUtils.DegToRad);
+        _scene.Add(cube);
+
+        var input = _window.CreateInput();
+        foreach (var kb in input.Keyboards)
+            kb.KeyDown += OnKeyDown;
+        foreach (var mouse in input.Mice)
+        {
+            mouse.MouseDown += OnMouseDown;
+            mouse.MouseUp += OnMouseUp;
+            mouse.MouseMove += OnMouseMove;
+            mouse.Scroll += OnMouseScroll;
+        }
+
+        _gameTimer = new GameTimer();
+        _gameTimer.Tick += OnGameTick;
+        _gameTimer.Start();
+    }
+
+    private static void OnGameTick(float deltaTime)
+    {
+        _scene.Update(deltaTime);
+    }
+
+    private static void OnRender(double deltaTime)
+    {
+        _graphics.ClearColor(Color.CornflowerBlue);
+        _graphics.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _scene.Render();
+    }
+
+    private static void OnResize(Vector2D<int> size)
+    {
+        _graphics.Resize(size.X, size.Y);
+        _scene.Camera.AspectRatio = size.X / (float)size.Y;
+    }
+
+    private static void OnClosing()
+    {
+        _gameTimer?.Stop();
+        _gameTimer?.Dispose();
+        _scene?.Dispose();
+        _graphics?.Dispose();
+    }
+
+    // ---- 输入事件 ----
+    private static void OnKeyDown(IKeyboard keyboard, Key key, int code)
+    {
+        if (key == Key.Escape) _window.Close();
+    }
+
+    private static void OnMouseDown(IMouse mouse, MouseButton button)
+    {
+        if (button == MouseButton.Left || button == MouseButton.Right)
+        {
+            _isDragging = true;
+            _lastMousePos = new Vector2(mouse.Position.X, mouse.Position.Y);
+        }
+    }
+
+    private static void OnMouseUp(IMouse mouse, MouseButton button)
+    {
+        if (button == MouseButton.Left || button == MouseButton.Right)
+            _isDragging = false;
+    }
+
+    private static void OnMouseMove(IMouse mouse, Vector2 position)
+    {
+        if (!_isDragging) return;
+        Vector2 delta = new Vector2(position.X, position.Y) - _lastMousePos;
+        _lastMousePos = new Vector2(position.X, position.Y);
+
+        if (mouse.IsButtonPressed(MouseButton.Left))
+            _scene.Camera.Rotate(delta.X * 0.2f, -delta.Y * 0.2f);
+        else if (mouse.IsButtonPressed(MouseButton.Right))
+            _scene.Camera.Pan(delta * 0.01f);
+    }
+
+    private static void OnMouseScroll(IMouse mouse, ScrollWheel scroll)
+    {
+        _scene.Camera.Zoom(scroll.Y * 0.5f);
+    }
+
+    // ---- 创建立方体网格 ----
+    private static Mesh CreateCubeMesh(GL gl)
+    {
+        float half = 0.5f;
+        float[] vertices = {
+            // 位置 (3) + UV (2) + 法线 (3) + 切线 (3)
+            -half, -half,  half,  0f,0f,  0f,0f,1f,  1f,0f,0f,
+             half, -half,  half,  1f,0f,  0f,0f,1f,  1f,0f,0f,
+             half,  half,  half,  1f,1f,  0f,0f,1f,  1f,0f,0f,
+            -half,  half,  half,  0f,1f,  0f,0f,1f,  1f,0f,0f,
+            -half, -half, -half,  1f,0f,  0f,0f,-1f, -1f,0f,0f,
+             half, -half, -half,  0f,0f,  0f,0f,-1f, -1f,0f,0f,
+             half,  half, -half,  0f,1f,  0f,0f,-1f, -1f,0f,0f,
+            -half,  half, -half,  1f,1f,  0f,0f,-1f, -1f,0f,0f,
+            -half,  half, -half,  0f,0f,  0f,1f,0f,  1f,0f,0f,
+             half,  half, -half,  1f,0f,  0f,1f,0f,  1f,0f,0f,
+             half,  half,  half,  1f,1f,  0f,1f,0f,  1f,0f,0f,
+            -half,  half,  half,  0f,1f,  0f,1f,0f,  1f,0f,0f,
+            -half, -half, -half,  0f,1f,  0f,-1f,0f,  1f,0f,0f,
+             half, -half, -half,  1f,1f,  0f,-1f,0f,  1f,0f,0f,
+             half, -half,  half,  1f,0f,  0f,-1f,0f,  1f,0f,0f,
+            -half, -half,  half,  0f,0f,  0f,-1f,0f,  1f,0f,0f,
+             half, -half, -half,  0f,0f,  1f,0f,0f,  0f,0f,-1f,
+             half, -half,  half,  1f,0f,  1f,0f,0f,  0f,0f,-1f,
+             half,  half,  half,  1f,1f,  1f,0f,0f,  0f,0f,-1f,
+             half,  half, -half,  0f,1f,  1f,0f,0f,  0f,0f,-1f,
+            -half, -half, -half,  1f,0f, -1f,0f,0f,  0f,0f,1f,
+            -half, -half,  half,  0f,0f, -1f,0f,0f,  0f,0f,1f,
+            -half,  half,  half,  0f,1f, -1f,0f,0f,  0f,0f,1f,
+            -half,  half, -half,  1f,1f, -1f,0f,0f,  0f,0f,1f
         };
-        _window = Window.Create(options);
-        _window.Load += OnLoad;
-        _window.Update += OnUpdate;
-        _window.Render += OnRender;
-        _window.Run();
-    }
 
-    private static unsafe void OnLoad()
-    {
-        Console.WriteLine("Hello World!");
-        IInputContext input = _window.CreateInput();
-        for (int i = 0; i < input.Keyboards.Count; i++)
-            input.Keyboards[i].KeyDown += KeyDown;
-        
-        _gl = _window.CreateOpenGL();  // 创建Opengl上下文
-        _vao = _gl.GenVertexArray();
-        _gl.BindVertexArray(_vao);  // 创建顶点数组对象并绑定
-        // The quad vertices data. Now with Texture coordinates!
-        float[] vertices =
-        {
-        //       aPosition     | aTexCoords
-            0.5f,  0.5f, 0.0f,  1.0f, 1.0f,
-            0.5f, -0.5f, 0.0f,  1.0f, 0.0f,
-            -0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
-            -0.5f,  0.5f, 0.0f,  0.0f, 1.0f
+        // 每个面的三角形顶点顺序必须保证从外侧看为逆时针(CCW)，
+        // 否则会被背面剔除(CullFace.Back)当成背面剔除，导致该面在正面观察时消失。
+        // 已用叉积逐面验证：front/bottom/left 正确；back/top/right 绕序已修正。
+        uint[] indices = {
+             0,1,2, 2,3,0,          // front (+Z)   CCW ✓
+             4,6,5, 6,4,7,          // back  (-Z)   CCW ✓ (原 4,5,6/6,7,4 为反向绕序)
+             8,10,9, 10,8,11,       // top   (+Y)   CCW ✓ (原 8,9,10/10,11,8 为反向绕序)
+             12,13,14, 14,15,12,    // bottom(-Y)   CCW ✓
+             16,18,17, 18,16,19,    // right (+X)   CCW ✓ (原 16,17,18/18,19,16 为反向绕序)
+             20,21,22, 22,23,20     // left  (-X)   CCW ✓
         };
-        _vbo = _gl.GenBuffer();
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
-        fixed (float* buf = vertices)
-            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint) (vertices.Length * sizeof(float)), buf, BufferUsageARB.StaticDraw);
-        // 顶点索引
-        uint[] indices =
-        {
-            0u, 1u, 3u,
-            1u, 2u, 3u
-        };
-        _ebo = _gl.GenBuffer();
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
-        fixed (uint* buf = indices)
-            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint) (indices.Length * sizeof(uint)), buf, BufferUsageARB.StaticDraw);
-        // 顶点着色器代码
-        const string vertexCode = @"
-        #version 330 core
 
-        layout (location = 0) in vec3 aPosition;
-        // Add a new input attribute for the texture coordinates
-        layout (location = 1) in vec2 aTextureCoord;
-
-        // Add an output variable to pass the texture coordinate to the fragment shader
-        // This variable stores the data that we want to be received by the fragment
-        out vec2 frag_texCoords;
-
-        void main()
-        {
-            gl_Position = vec4(aPosition, 1.0);
-            // Assigin the texture coordinates without any modification to be recived in the fragment
-            frag_texCoords = aTextureCoord;
-        }";
-        
-        // 片段着色器
-        const string fragmentCode = @"
-        #version 330 core
-
-        // Receive the input from the vertex shader in an attribute
-        in vec2 frag_texCoords;
-        uniform sampler2D uTexture;
-
-        out vec4 out_color;
-
-        void main()
-        {
-            // This will allow us to see the texture coordinates in action!
-            out_color = texture(uTexture, frag_texCoords);
-        }";
-        
-        // 创建着色器对象
-        uint vertexShader = _gl.CreateShader(ShaderType.VertexShader);
-        _gl.ShaderSource(vertexShader, vertexCode);
-        
-        _gl.CompileShader(vertexShader);
-        _gl.GetShader(vertexShader, ShaderParameterName.CompileStatus, out int vStatus);
-        if (vStatus != (int) GLEnum.True)
-            throw new Exception("Vertex shader failed to compile: " + _gl.GetShaderInfoLog(vertexShader));
-        
-        uint fragmentShader = _gl.CreateShader(ShaderType.FragmentShader);
-        _gl.ShaderSource(fragmentShader, fragmentCode);
-
-        _gl.CompileShader(fragmentShader);
-        _gl.GetShader(fragmentShader, ShaderParameterName.CompileStatus, out int fStatus);
-        if (fStatus != (int) GLEnum.True)
-            throw new Exception("Fragment shader failed to compile: " + _gl.GetShaderInfoLog(fragmentShader));
-        
-        _program = _gl.CreateProgram();
-        // 链接程序
-        _gl.AttachShader(_program, vertexShader);
-        _gl.AttachShader(_program, fragmentShader);
-        _gl.LinkProgram(_program);
-        _gl.GetProgram(_program, ProgramPropertyARB.LinkStatus, out int lStatus);
-        if (lStatus != (int) GLEnum.True)
-            throw new Exception("Program failed to link: " + _gl.GetProgramInfoLog(_program));
-        _gl.UseProgram(_program);
-        int location = _gl.GetUniformLocation(_program, "uTexture");
-        _gl.Uniform1(location, 0);
-        _gl.UseProgram(0); // 可选解绑，但保持干净
-        
-        // 过河拆桥
-        _gl.DetachShader(_program, vertexShader);
-        _gl.DetachShader(_program, fragmentShader);
-        _gl.DeleteShader(vertexShader);
-        _gl.DeleteShader(fragmentShader);
-        
-        const uint positionLoc = 0;
-        _gl.EnableVertexAttribArray(positionLoc);
-        _gl.VertexAttribPointer(positionLoc, 3, VertexAttribPointerType.Float, false, 5 * sizeof(float), (void*)0);
-        
-        const uint texCoordLoc = 1;
-        _gl.EnableVertexAttribArray(texCoordLoc);
-        _gl.VertexAttribPointer(texCoordLoc, 2, VertexAttribPointerType.Float, false, 5 * sizeof(float), (void*)(3 * sizeof(float)));
-        
-        _gl.BindVertexArray(0);
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
-        
-        _texture = _gl.GenTexture();
-        _gl.ActiveTexture(TextureUnit.Texture0);
-        _gl.BindTexture(TextureTarget.Texture2D, _texture);
-        
-        // ImageResult.FromMemory reads the bytes of the .png file and returns all its information!
-        ImageResult result = ImageResult.FromMemory(File.ReadAllBytes("silk.png"), ColorComponents.RedGreenBlueAlpha);
-        // Define a pointer to the image data
-        fixed (byte* ptr = result.Data)
-            // Here we use "result.Width" and "result.Height" to tell OpenGL about how big our texture is.
-            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, (uint)result.Width,
-                (uint)result.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-        _gl.TexParameterI(GLEnum.Texture2D, GLEnum.TextureWrapS, (int)TextureWrapMode.Repeat);
-        _gl.TexParameterI(GLEnum.Texture2D, GLEnum.TextureWrapT, (int)TextureWrapMode.Repeat);
-        _gl.TexParameterI(GLEnum.Texture2D, GLEnum.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        _gl.TexParameterI(GLEnum.Texture2D, GLEnum.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        _gl.GenerateMipmap(TextureTarget.Texture2D);
-        _gl.BindTexture(TextureTarget.Texture2D, 0);
-        _gl.Enable(EnableCap.Blend);
-        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-    }
-
-    private static void OnUpdate(double deltaTime)
-    {
-        // Console.WriteLine("Update");
-    }
-
-    private static unsafe void OnRender(double deltaTime)
-    {
-        _gl.ClearColor(Color.CornflowerBlue);  // 调颜色
-        _gl.Clear(ClearBufferMask.ColorBufferBit);  // 刷墙
-        
-        _gl.BindVertexArray(_vao);
-        _gl.UseProgram(_program);
-        _gl.ActiveTexture(TextureUnit.Texture0);
-        _gl.BindTexture(TextureTarget.Texture2D, _texture);
-        _gl.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, (void*) 0);
-        
-        // Console.WriteLine("Render!");
-    }
-
-    private static void KeyDown(IKeyboard keyboard, Key key, int keyCode)
-    {
-        if (key == Key.Escape)
-            _window.Close();
+        return new Mesh(gl, vertices, indices);
     }
 }
-

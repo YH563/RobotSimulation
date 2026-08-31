@@ -26,13 +26,29 @@ public class ShaderCache : IDisposable
         // 使用路径组合作为唯一键（确保路径一致时命中缓存）
         string key = $"{vertexPath}|{fragmentPath}";
 
-        if (_cache.TryGetValue(key, out var shader))
-            return shader;
+        if (_cache.TryGetValue(key, out var cached))
+            return cached;
 
         // 创建新着色器并加入缓存
-        var newShader = new ShaderProgram(_gl, vertexPath, fragmentPath);
-        _cache[key] = newShader;
-        return newShader;
+        string vertexSrc = ReadFileWithoutBom(vertexPath);
+        string fragmentSrc = ReadFileWithoutBom(fragmentPath);
+
+        var shader = new ShaderProgram(_gl, vertexSrc, fragmentSrc);
+        _cache[key] = shader;
+        return shader;
+    }
+    
+    /// <summary>
+    /// 使用路径读取着色器
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    private static string ReadFileWithoutBom(string path)
+    {
+        string content = File.ReadAllText(path);
+        if (content.Length > 0 && content[0] == '\uFEFF')
+            content = content.Substring(1);
+        return content;
     }
     
     public void Dispose()

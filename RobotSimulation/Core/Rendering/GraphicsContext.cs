@@ -24,7 +24,7 @@ public class GraphicsContext : IDisposable
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
         ShaderCache = new ShaderCache(_gl);
 
-        // 默认开启深度测试和背面剔除
+        // 默认开启深度测试和背面剔除，确保立方体等不透明几何体正确渲染
         _gl.Enable(EnableCap.DepthTest);
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Back);
