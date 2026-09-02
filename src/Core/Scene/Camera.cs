@@ -75,11 +75,11 @@ public class Camera
         float yawRad = MathUtils.DegreesToRadians(_yaw);
         float pitchRad = MathUtils.DegreesToRadians(_pitch);
 
-        // 计算视线方向向量（球坐标转直角坐标）
+        // 计算视线方向向量（球坐标转直角坐标；世界 Z 朝上，pitch 抬升 Z）
         Vector3 direction = new Vector3(
             MathF.Cos(yawRad) * MathF.Cos(pitchRad),
-            MathF.Sin(pitchRad),
-            MathF.Sin(yawRad) * MathF.Cos(pitchRad)
+            MathF.Sin(yawRad) * MathF.Cos(pitchRad),
+            MathF.Sin(pitchRad)
         );
         direction = Vector3.Normalize(direction);
 
@@ -89,10 +89,11 @@ public class Camera
     
     /// <summary>
     /// 获取视图矩阵（观察矩阵），用于将世界坐标转换到相机空间。
+    /// 世界 Z 朝上，因此观察上方向为 +Z。
     /// </summary>
     public Matrix4x4 GetViewMatrix()
     {
-        return Matrix4x4.CreateLookAt(Position, _target, Vector3.UnitY);
+        return Matrix4x4.CreateLookAt(Position, _target, Vector3.UnitZ);
     }
 
     /// <summary>
@@ -135,7 +136,7 @@ public class Camera
     public void Pan(Vector2 delta)
     {
         Vector3 forward = Vector3.Normalize(Target - Position);
-        Vector3 right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
+        Vector3 right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitZ));
         Vector3 up = Vector3.Cross(right, forward);
 
         const float speed = 0.05f;

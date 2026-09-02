@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
-using RobotSimulation.Core.Rendering;
 using System.Numerics;
+using RobotSimulation.Core.GameObjects;
 
 namespace RobotSimulation.Core.Scene;
 
-public class Scene : IDisposable
+public class SceneGraph : IDisposable
 {
     private readonly List<GameObject> _roots = new();
+
+    /// <summary>场景根节点（供渲染器遍历与外部只读访问）。</summary>
+    public IReadOnlyList<GameObject> Roots => _roots;
+
     public Camera Camera { get; private set; } = new Camera();
     private bool _disposed = false;
     
@@ -60,50 +64,12 @@ public class Scene : IDisposable
             UpdateRecursive(child.Owner, deltaTime);
     }
 
-    /// <summary>
-    /// 递归渲染所有可见节点（由主线程调用）
-    /// </summary>
-    public void Render()
-    {
-        foreach (var root in _roots)
-            RenderRecursive(root);
-    }
-
-    private void RenderRecursive(GameObject node)
-    {
-        if (!node.Visible || node.Mesh == null || node.Material == null)
-            return;
-
-        node.Material.Apply();
-        var shader = node.Material.Shader;
-        shader.SetUniform("uModel", node.Transform.GetModelMatrix());
-        shader.SetUniform("uView", Camera.GetViewMatrix());
-        shader.SetUniform("uProjection", Camera.GetProjectionMatrix());
-        shader.SetUniform("uLightPos", LightPosition);
-        shader.SetUniform("uLightColor", LightColor);
-        shader.SetUniform("uViewPos", Camera.Position);
-
-        node.Mesh.Draw();
-
-        foreach (var child in node.Transform.Children)
-            RenderRecursive(child.Owner);
-    }
-    
     public void Dispose()
     {
         if (_disposed) return;
 
-        void DisposeRecursive(GameObject node)
-        {
-            node.Mesh?.Dispose();
-            node.Material?.Dispose();
-            foreach (var child in node.Transform.Children)
-                DisposeRecursive(child.Owner);
-        }
-
-        foreach (var root in _roots)
-            DisposeRecursive(root);
-
+        // GPU 网格/材质由渲染器（Renderer）统一释放；
+        // 场景本身只持有数据引用，此处仅清理节点列表。
         _roots.Clear();
         _disposed = true;
     }

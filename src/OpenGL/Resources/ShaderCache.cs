@@ -2,9 +2,10 @@ using Silk.NET.OpenGL;
 using System;
 using System.Collections.Generic;
 
-namespace RobotSimulation.Core.Rendering;
+namespace RobotSimulation.OpenGL.Resources;
 
-public class ShaderCache : IDisposable
+/// <summary>着色器程序缓存（渲染实现内部服务，仅由 GraphicsContext 使用）。</summary>
+internal sealed class ShaderCache : IDisposable
 {
     private readonly GL _gl;
     private readonly Dictionary<string, ShaderProgram> _cache = new();
