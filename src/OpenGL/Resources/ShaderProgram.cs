@@ -50,9 +50,45 @@ public class ShaderProgram : IDisposable
 
     public void SetUniform(string name, float value) => SetIfValid(name, loc => _gl.Uniform1(loc, value));
 
+    public void SetUniform(string name, float[] values)
+    {
+        if (values.Length == 0) return;
+        int loc = GetLocation(name);
+        if (loc == -1) return;
+        unsafe
+        {
+            fixed (float* ptr = values)
+                _gl.Uniform1(loc, (uint)values.Length, ptr);
+        }
+    }
+
+    public void SetUniform(string name, int[] values)
+    {
+        if (values.Length == 0) return;
+        int loc = GetLocation(name);
+        if (loc == -1) return;
+        unsafe
+        {
+            fixed (int* ptr = values)
+                _gl.Uniform1(loc, (uint)values.Length, ptr);
+        }
+    }
+
     public void SetUniform(string name, Vector2 value) => SetIfValid(name, loc => _gl.Uniform2(loc, value));
 
     public void SetUniform(string name, Vector3 value) => SetIfValid(name, loc => _gl.Uniform3(loc, value));
+
+    public void SetUniform(string name, Vector3[] values)
+    {
+        if (values.Length == 0) return;
+        int loc = GetLocation(name);
+        if (loc == -1) return;
+        unsafe
+        {
+            fixed (Vector3* ptr = values)
+                _gl.Uniform3(loc, (uint)values.Length, (float*)ptr);
+        }
+    }
 
     public void SetUniform(string name, Vector4 value) => SetIfValid(name, loc => _gl.Uniform4(loc, value));
 

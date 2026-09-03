@@ -17,6 +17,9 @@ namespace RobotSimulation.OpenGL.Rendering;
 /// </summary>
 public sealed class Renderer : IRenderer
 {
+    /// <summary>单 pass 支持的最大光源数（与 Standard.frag 的 MAX_LIGHTS 一致）。</summary>
+    public const int MaxLights = 8;
+
     private readonly GL _gl;
     private readonly ShaderProgram _standardShader;
     private readonly Dictionary<MeshData, Mesh> _meshCache = new();
@@ -44,8 +47,41 @@ public sealed class Renderer : IRenderer
         Matrix4x4 view = scene.Camera.GetViewMatrix();
         Matrix4x4 projection = scene.Camera.GetProjectionMatrix();
 
+        // 收集光源参数：每个光源对应 uniform 数组的一个槽位
+        var colors = new Vector3[MaxLights];
+        var positions = new Vector3[MaxLights];
+        var directions = new Vector3[MaxLights];
+        var types = new int[MaxLights];
+        var intensities = new float[MaxLights];
+        int lightCount = 0;
+
+        foreach (Light light in scene.Lights)
+        {
+            if (lightCount >= MaxLights) break;
+            colors[lightCount] = light.Color;
+            positions[lightCount] = light.Position;
+            directions[lightCount] = light.Direction;
+            types[lightCount] = light.Type == LightType.Directional ? 1 : 0;
+            intensities[lightCount] = light.Intensity;
+            lightCount++;
+        }
+
+        ApplyLightUniforms(colors, positions, directions, types, intensities, lightCount);
+
         foreach (GameObject root in scene.Roots)
             RenderNode(root, scene, view, projection);
+    }
+
+    /// <summary>把光源参数写入默认着色器的 uniform 数组。</summary>
+    private void ApplyLightUniforms(Vector3[] colors, Vector3[] positions, Vector3[] directions,
+        int[] types, float[] intensities, int count)
+    {
+        _standardShader.SetUniform("uLightCount", count);
+        _standardShader.SetUniform("uLightColors", colors);
+        _standardShader.SetUniform("uLightPositions", positions);
+        _standardShader.SetUniform("uLightDirections", directions);
+        _standardShader.SetUniform("uLightTypes", types);
+        _standardShader.SetUniform("uLightIntensities", intensities);
     }
 
     private void RenderNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
@@ -66,8 +102,6 @@ public sealed class Renderer : IRenderer
             shader.SetUniform("uModel", node.Transform.GetModelMatrix());
             shader.SetUniform("uView", view);
             shader.SetUniform("uProjection", projection);
-            shader.SetUniform("uLightPos", scene.LightPosition);
-            shader.SetUniform("uLightColor", scene.LightColor);
             shader.SetUniform("uViewPos", scene.Camera.Position);
 
             mesh.Draw();

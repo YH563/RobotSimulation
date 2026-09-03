@@ -32,6 +32,15 @@ public class GameObject
     }
 
     /// <summary>
+    /// 通过外部模型文件加载模型数据与材质
+    /// </summary>
+    /// <param name="filePath"></param>
+    public void LoadModel(string filePath)
+    {
+        
+    }
+
+    /// <summary>
     /// 单帧更新逻辑
     /// </summary>
     /// <param name="deltaTime"></param>

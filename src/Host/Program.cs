@@ -114,8 +114,14 @@ public class Program
         _graphics.Resized += (w, h) => _scene.Camera.AspectRatio = w / (float)h;
         _graphics.Resize(_window.Size.X, _window.Size.Y);
 
-        _scene.LightPosition = new Vector3(4, 5, 10);   // Z-up：光源置于地面上方
-        _scene.LightColor = new Vector3(1, 1, 1);
+        // 光源：作为 GameObject 加入场景（可多个，Renderer 会把它们传入 shader）
+        var keyLight = new Light("key_light")
+        {
+            Color = new Vector3(1f, 1f, 1f),
+            Intensity = 1f,
+        };
+        keyLight.Transform.Position = new Vector3(4, 5, 10);   // Z-up：光源置于地面上方
+        _scene.Add(keyLight);
 
         // 渲染器：GPU 网格/材质只存在于它内部（Scene/GameObject 均为纯数据）
         _renderer = new Renderer(

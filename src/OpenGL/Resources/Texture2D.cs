@@ -15,7 +15,70 @@ public class Texture2D : IDisposable
     private readonly GL _gl;
     private readonly uint _handle;
     private bool _disposed = false;
+    
+    public Texture2D(GL gl, TextureReference textureRef)
+    {
+        _gl = gl;
+        if (!textureRef.IsValid)
+            throw new ArgumentException("TextureReference is invalid (no file path or data).");
 
+        // 1. 获取原始字节数据（从文件读 或 直接用内存数据）
+        byte[] imageBytes;
+        if (textureRef.HasMemoryData)
+        {
+            imageBytes = textureRef.ImageData!; 
+        }
+        else // HasFileData
+        {
+            if (!File.Exists(textureRef.FilePath))
+                throw new FileNotFoundException($"Texture file not found: {textureRef.FilePath}");
+            imageBytes = File.ReadAllBytes(textureRef.FilePath!);
+        }
+
+        // 2. 翻转并解码（保持你原有的逻辑）
+        StbImage.stbi_set_flip_vertically_on_load(1);
+        ImageResult result = ImageResult.FromMemory(imageBytes, ColorComponents.RedGreenBlueAlpha);
+
+        // 3. 上传 GPU（使用 textureRef 的属性）
+        _handle = _gl.GenTexture();
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, _handle);
+
+        unsafe
+        {
+            fixed (byte* ptr = result.Data)
+            {
+                InternalFormat internalFormat = textureRef.ColorSpace == TextureColorSpace.Srgb 
+                    ? InternalFormat.Srgb8Alpha8 
+                    : InternalFormat.Rgba8;
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, internalFormat,
+                    (uint)result.Width, (uint)result.Height, 0,
+                    PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            }
+        }
+
+        // 4. 设置采样参数（使用 textureRef.GenerateMipmaps）
+        if (textureRef.GenerateMipmaps)
+        {
+            _gl.GenerateMipmap(TextureTarget.Texture2D);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, 
+                (int)TextureMinFilter.LinearMipmapLinear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, 
+                (int)TextureMagFilter.Linear);
+        }
+        else
+        {
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, 
+                (int)TextureMinFilter.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, 
+                (int)TextureMagFilter.Linear);
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+    
     public Texture2D(GL gl, string filePath, bool generateMipmaps = true, TextureColorSpace colorSpace = TextureColorSpace.Srgb)
     {
         _gl = gl;

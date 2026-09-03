@@ -5,8 +5,15 @@ in vec3 v_normal;
 in vec3 v_tangent;
 in vec3 v_worldPos;
 
-uniform vec3 uLightPos;     // 光源世界位置
-uniform vec3 uLightColor;   // 光源色彩
+#define MAX_LIGHTS 8
+
+uniform int uLightCount;
+uniform vec3 uLightColors[MAX_LIGHTS];      // 颜色
+uniform vec3 uLightPositions[MAX_LIGHTS];   // 点光源位置
+uniform vec3 uLightDirections[MAX_LIGHTS];  // 方向光方向（照射方向）
+uniform int  uLightTypes[MAX_LIGHTS];       // 0=点光, 1=方向光
+uniform float uLightIntensities[MAX_LIGHTS];
+
 uniform vec3 uViewPos;      // 摄像机世界位置
 uniform vec4 uBaseColor;    // 后备颜色
 
@@ -38,24 +45,31 @@ void main()
         normal = normalize(TBN * tangentNormal);
     }
 
-    // 3. 光照计算（Blinn-Phong）
-    vec3 lightDir = normalize(uLightPos - v_worldPos);
     vec3 viewDir = normalize(uViewPos - v_worldPos);
-    vec3 halfDir = normalize(lightDir + viewDir);
 
-    // 环境光（保持足够的亮度，避免背光面完全纯黑）
-    float ambient = 0.3;
-    // 漫反射
-    float diff = max(dot(normal, lightDir), 0.0);
-    // 高光（指数 32）
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+    // 3. 逐光源累加（Blinn-Phong）
+    vec3 result = vec3(0.0);
+    for (int i = 0; i < uLightCount; i++)
+    {
+        vec3 lightColor = uLightColors[i] * uLightIntensities[i];
 
-    vec3 lightColor = uLightColor;
-    vec3 ambientColor = ambient * lightColor;
-    vec3 diffuseColor = diff * lightColor;
-    vec3 specularColor = spec * lightColor * 0.5; // 强度系数
+        vec3 lightDir;
+        if (uLightTypes[i] == 1)
+            lightDir = normalize(-uLightDirections[i]); // 方向光：朝向光源 = 反方向
+        else
+            lightDir = normalize(uLightPositions[i] - v_worldPos); // 点光
 
-    vec3 finalColor = (ambientColor + diffuseColor) * albedo.rgb + specularColor;
+        float diff = max(dot(normal, lightDir), 0.0);
+
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+
+        result += lightColor * (diff + spec * 0.5); // 高光强度系数 0.5
+    }
+
+    // 环境光（与光源无关的常数项，保证背光面不纯黑）
+    vec3 ambientColor = vec3(0.12, 0.13, 0.15);
+    vec3 finalColor = (ambientColor + result) * albedo.rgb;
 
     out_color = vec4(finalColor, albedo.a);
 }

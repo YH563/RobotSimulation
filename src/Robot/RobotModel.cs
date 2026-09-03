@@ -180,7 +180,7 @@ public sealed class RobotModel
         {
             IAssetResolver resolver = _resolver ?? new FileSystemAssetResolver();
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } path)
-                data.AlbedoTexture = new TextureReference(path, TextureColorSpace.Srgb, GenerateMipmaps: true);
+                data.AlbedoTexture = TextureReference.FromFile(path);
         }
         return data;
     }

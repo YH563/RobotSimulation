@@ -6,4 +6,11 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+      <PackageReference Include="AssimpNet" Version="4.1.0" />
+      <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+      <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+      <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
+    </ItemGroup>
+
 </Project>
