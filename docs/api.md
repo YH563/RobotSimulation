@@ -29,7 +29,7 @@
 | 未来的程序集 | 内容 | 预期 public 面 |
 |---|---|---|
 | `RobotSimulation.RobotModel` | `Robot/Description` + `Robot/Urdf` | 门面 + 数据模型全 public，实现细节 internal |
-| `RobotSimulation.Core` | `Core/Geometry`, `Scene`, 渲染**抽象** | Geometry/Scene public；渲染抽象接口 public |
+| `RobotSimulation.Core` | `Core/Scene` + `Core/Geometry` + `Core/Rendering` | Scene/Geometry 与渲染抽象接口 public |
 | `RobotSimulation.Rendering.Silk` | GL 实现 | 仅宿主需要的最小上下文类型 |
 | `RobotSimulation.Visualization` | Display、Sink、Visuals | Sink / 句柄门面 public，Visual 内部 |
 | `RobotSimulation.Widgets.Avalonia` 等 | 控件 | `RobotViewport` 等宿主控件 |
@@ -42,33 +42,52 @@
 | API 面 | 目标用户 | 公开类型 | 说明 |
 |---|---|---|---|
 | **A · 组件面** | 工控集成者（开箱即用） | `RobotModel`、`RobotViewport`、`IVisualizationSink`、Robot 数据模型 | URDF → 机器人显示 + 数据 Push，嵌入宿主 UI 即用 |
-| **B · 图形内核面** | 需特殊处理的开发者 | `MeshData`、`PrimitiveBuilder`、`MeshImporter`、`Scene/GameObject/Transform/Camera`、`RobotModel`/`RobotGameObject` | 自由生成/导入网格、自定义可视化、接自有场景树 |
+| **B · 图形内核面** | 需特殊处理的开发者 | `MeshData`、图元 GameObject 类（`Box`/`Sphere`/`Cylinder`/`Capsule`/`GroundPlane`）、`AssimpModelLoader`、`Scene/GameObject/Transform/Camera`、`RobotModel`（机器人 GameObject 树） | 自由生成/导入网格、自定义可视化、接自有场景树 |
 
-- 两面同库同进程；A 构建于 B 之上（`RobotModel.Instantiate` 内部使用图元数据与 importer）。
-- 高级用法示例：用 B 的 `MeshImporter` 载入私有格式 → `MeshData`，再交给 A 的 Sink/场景
+- 两面同库同进程；A 构建于 B 之上（`RobotModel` 构建时内部使用图元数据与 importer）。
+- 高级用法示例：用 B 的 `AssimpModelLoader` 载入模型文件 → `MeshData`，再交给 A 的 Sink/场景
   或直接用 B 渲染。两面都不属于"应用交互"（见 §1.7）。
 
 
 ## 3. 公共类型清单（按模块）
 
-### 3.1 `Core/Geometry`（引擎能力，public）
+### 3.1 `Core/Scene`（引擎能力，public）
+
+场景对象模型：`GameObject`（含 `Name`，支持无 Mesh 的骨架节点）、`Transform`（父子层级，
+行主序/行向量）、`SceneGraph`（Add/Remove/Update）、`Light`、`Camera`（轨道相机：只暴露数学
+状态与 `Rotate/Pan/Zoom/Reset` 命令，不暴露输入框架类型）。
+
+基础图元是 `GameObject` 派生类——`new` 即生成 CPU 几何，轴沿 +Z，参数为 URDF 语义尺寸：
+
+| 类型 | 说明 |
+|---|---|
+| `Box` | 长方体贴盒；`(width, height, depth)` |
+| `Sphere` | 经纬球；`(radius[, segments = 32, rings = 16])` |
+| `Cylinder` | 圆柱；`(radius, length[, segments = 32])` |
+| `Capsule` | 胶囊；`(radius, length[, segments = 32, rings = 8])` |
+| `GroundPlane` | 水平地面（XY 平面、法线 +Z；命名避开 `System.Numerics.Plane`）；`(width, depth)` |
+
+### 3.2 `Core/Geometry`（引擎能力，public）
 
 | 类型 | 说明 |
 |---|---|
 | `MeshData` | CPU 网格数据；`AddVertex/AddTriangle/ToInterleavedArray/ToIndexArray` |
-| `PrimitiveBuilder` | 静态图元生成（纯函数）；`CreateBox/Sphere/Cylinder/Capsule/Plane`，轴沿 +Z |
-| `MeshImporter` | 门面：模型文件 → `MeshData`（按扩展名分发） |
-| `StlImporter` | STL（binary + ascii）→ `MeshData` |
+| `VertexLayout` | 交错顶点布局单一事实来源（pos3 \| uv2 \| normal3 \| tangent3） |
+| `AssimpModelLoader`（`Geometry.Import`） | 模型文件 → `LoadedModel`（STL/OBJ/DAE/glTF，封装 AssimpNet）；`Load` / `LoadMeshData` |
+| `LoadedModel` / `LoadedMesh` | 导入结果：平铺 submesh 列表（每个 = MeshData + MaterialData） |
+| `LoadOptions` | 导入选项（FlipUvV / FlipWinding / GlobalScale） |
 
-这些类型是"引擎能力"而非机器人专用，保持 public，允许宿主/用户自定义扩展几何与格式接入
-（通过 `MeshImporter` 门面扩展后续 OBJ/DAE/glTF，或封装 AssimpNet）。
+> `MeshImporter`/`StlImporter` 为 M2.5 规划中的"按扩展名分发门面 + 手写 STL 导入器"（尚未实现）。
 
-### 3.2 `Core/Scene`（引擎能力，public）
+### 3.3 `Core/Rendering`（引擎能力，public）
 
-`Scene`、`GameObject`、`Transform`、`Camera` 均为 public。注意：Camera 只暴露数学状态
-与命令（`Rotate/Pan/Zoom/Reset`），不暴露具体输入框架类型。
+| 类型 | 说明 |
+|---|---|
+| `MaterialData` | PBR 材质描述（CPU：BaseColor/Metallic/Roughness + 贴图引用 + 双面/线框位） |
+| `TextureReference` | 贴图引用（文件路径或内存字节 + sRGB/Linear 语义）；GPU 上传归渲染后端 |
+| `IRenderer` / `IRenderContext` | 渲染抽象接口（public 面不出现 GL 类型） |
 
-### 3.3 `Robot/Description` + `Robot/Urdf`（数据契约，public；解析内部细节 internal）
+### 3.4 `Robot/Description` + `Robot/Urdf`（数据契约，public；解析内部细节 internal）
 
 **数据模型（纯数据、无引擎引用，public）：**
 
@@ -82,13 +101,13 @@
 
 | 类型 | 形态 | 说明 |
 |---|---|---|
-| `RobotModel` | 静态工厂 + 实例 | 单入口：`Parse/ParseFile`（持有 `Description`）；`Instantiate()`（无渲染参数）返回 `RobotGameObject`；`CreateState()` 返回 headless FK |
+| `RobotModel` | 实例 = `RobotModel : GameObject`（树根）+ 静态工厂 | 单入口：`Parse/ParseFile` 直接得到完整机器人树（可 `scene.Add`）；`new RobotModel(description)` 复用任意描述；`Description`/`CreateState()` 供 headless |
 | `IAssetResolver` | 接口 | 扩展点：解析 mesh/texture 相对路径与 `package://` |
 | `UrdfParser` | internal 或 public(备选) | 实现细节；如 public 需文档化为"高级用法" |
 
 **内部不公开：** 浮点解析辅助、XML 容错细节、树校验内部算法。
 
-### 3.4 `Visualization`（rviz-like 层，public 面最小化）
+### 3.5 `Visualization`（rviz-like 层，public 面最小化）
 
 | 类型 | 说明 |
 |---|---|
@@ -98,7 +117,7 @@
 
 内部不公开：`Visuals/*Visual`（除非用户需自定义 Display 类型——届时暴露窄基类/接口）。
 
-### 3.5 Widgets / Host（仅"渲染表面 + 相机"，非应用 UI）
+### 3.6 Widgets / Host（仅"渲染表面 + 相机"，非应用 UI）
 
 `RobotViewport`（Avalonia/WPF 各自实现）只提供：一块可渲染的表面、`Camera`（数学状态 +
 `Rotate/Pan/Zoom/Reset` 命令）、`Sink` 与 `LoadRobot`。**不包含**点选/菜单/面板/测量等应用
@@ -114,26 +133,22 @@
 ```csharp
 namespace RobotSimulation.Robot;
 
-/// <summary>机器人单入口：解析 + 持有描述 + 创建场景对象。</summary>
-public sealed class RobotModel
+/// <summary>机器人：URDF/描述的单入口，同时是可入场景的 GameObject 树根。</summary>
+public sealed class RobotModel : GameObject
 {
-    // ① 解析（静态）
+    // 便捷工厂：读 URDF → 完整机器人树（一次调用即可 scene.Add / 驱动）
     public static RobotModel Parse(string urdfXml, string? baseDirectory = null, IAssetResolver? resolver = null);
     public static RobotModel ParseFile(string path, IAssetResolver? resolver = null);
 
-    // ② 描述（纯数据，headless / FK / 序列化）
+    // 扩展点：任意 RobotDescription（SDF/自定义解析产物）都能构建同样的机器人树
+    public RobotModel(RobotDescription description, IAssetResolver? resolver = null);
+
+    // 纯数据描述（headless / FK / 序列化 / 多实例复用）
     public RobotDescription Description { get; }
-    public string? Name { get; }
+    public string RobotName { get; }               // URDF <robot name>（GameObject.Name = 根 link 名）
     public RobotState CreateState();               // headless 关节状态 + FK
 
-    // ③ 场景对象（纯数据、无渲染参数）——返回单个 GameObject，由调用方 scene.Add
-    public RobotGameObject Instantiate();
-}
-
-/// <summary>机器人在场景中的根节点：RobotGameObject : GameObject，与其它对象平等。</summary>
-public sealed class RobotGameObject : GameObject
-{
-    public string RobotName { get; }
+    // 关节驱动（自身即树根，scene.Add 后由渲染器遍历绘制）
     public IReadOnlyList<Joint> DrivableJoints { get; }
     public void SetJointValue(string name, float value);          // 旋转弧度/平移米
     public void ApplyJointValues(IReadOnlyList<float> values);
@@ -143,10 +158,9 @@ public sealed class RobotGameObject : GameObject
 使用示例（也是实际代码形态）：
 
 ```csharp
-var model   = RobotModel.ParseFile("arm.urdf");      // ① 解析（持有 RobotDescription）
-var robotGo = model.Instantiate();                   // ② 场景对象（纯数据，任意线程）
-scene.Add(robotGo);                                   // ③ 与其它 GameObject 平等加入
-robotGo.SetJointValue("shoulder", 1.2f);             // ④ 驱动关节
+var robot = RobotModel.ParseFile("arm.urdf");       // 读 URDF → 完整机器人 GameObject 树
+scene.Add(robot);                                    // 与其它 GameObject 平等加入
+robot.SetJointValue("shoulder", 1.2f);               // 驱动关节（旋转弧度/平移米）
 ```
 
 `IAssetResolver`（扩展点，mesh/texture 路径解析）：

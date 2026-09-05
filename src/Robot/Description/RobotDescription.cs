@@ -99,7 +99,7 @@ public sealed record Joint
 
     /// <summary>
     /// 子 link 坐标系相对父 link 坐标系的位姿。↔ URDF joint.origin（xyz/rpy 合成）。
-    /// 刚体变换（仅平移 + 旋转），行向量/行主序与 Core.GameObjects.Transform 一致。
+    /// 刚体变换（仅平移 + 旋转），行向量/行主序与 Core.Scene.Transform 一致。
     /// </summary>
     public Matrix4x4 Origin { get; init; } = Matrix4x4.Identity;
 

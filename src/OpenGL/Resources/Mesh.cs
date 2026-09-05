@@ -1,4 +1,4 @@
-using RobotSimulation.Core.GameObjects;
+using RobotSimulation.Core.Geometry;
 using Silk.NET.OpenGL;
 using System;
 

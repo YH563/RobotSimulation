@@ -1,7 +1,6 @@
 using System;
 using System.Numerics;
 using RobotSimulation.Core.Rendering;
-using RobotSimulation.OpenGL.Resources;
 using Silk.NET.OpenGL;
 
 namespace RobotSimulation.OpenGL.Device;
@@ -16,9 +15,6 @@ public sealed class GraphicsContext : IRenderContext
     /// <summary>同程序集（渲染实现层）经此取得 GL；对 Core/上层不暴露。</summary>
     internal GL NativeGl => _gl;
 
-    /// <summary>着色器缓存（本类型创建，Dispose 时统一释放；渲染实现内部使用）。</summary>
-    internal ShaderCache ShaderCache { get; }
-
     /// <inheritdoc />
     public event Action<int, int>? Resized;
 
@@ -32,7 +28,6 @@ public sealed class GraphicsContext : IRenderContext
     public GraphicsContext(GL gl)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
-        ShaderCache = new ShaderCache(_gl);
 
         // 默认开启深度测试和背面剔除，确保不透明几何体正确渲染
         _gl.Enable(EnableCap.DepthTest);
@@ -57,17 +52,10 @@ public sealed class GraphicsContext : IRenderContext
             : ClearBufferMask.ColorBufferBit);
     }
 
-    /// <summary>加载/缓存默认着色器程序（同程序集渲染层使用）。</summary>
-    internal ShaderProgram LoadShader(string vertexPath, string fragmentPath)
-        => ShaderCache.GetOrCreate(vertexPath, fragmentPath);
-
-    /// <summary>
-    /// 释放着色器缓存及其他资源（不释放 _gl，GL 实例由宿主/窗口管理）。
-    /// </summary>
+    /// <summary>着色器程序统一由渲染器（Renderer）从内嵌标准目录创建并释放，本类型不再持有。</summary>
     public void Dispose()
     {
         if (_disposed) return;
-        ShaderCache.Dispose();
         _disposed = true;
     }
 }

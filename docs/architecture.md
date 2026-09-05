@@ -30,7 +30,7 @@
 | 编号 | 决策 | 理由 / 备注 |
 |---|---|---|
 | ADR-001 | 世界坐标系采用 **Z-up**（右手系），相机 up = +Z | 与 URDF/ROS/rviz 语义一致；URDF 圆柱/胶囊轴沿 +Z 可直接竖直，无需适配旋转 |
-| ADR-002 | 图元回转轴统一沿 +Z（URDF/ROS 几何语义） | `PrimitiveBuilder.CreateCylinder/Capsule/Sphere` |
+| ADR-002 | 图元回转轴统一沿 +Z（URDF/ROS 几何语义） | `Cylinder`/`Capsule`/`Sphere` 图元类（构造参数即轴沿 +Z 的尺寸语义） |
 | ADR-003 | `Core/Geometry` 使用纯 CPU `MeshData`，与 GL 解耦 | `MeshData → Mesh(GL)` 仅在渲染线程上传 |
 | ADR-004 | 几何图元生成用**静态类**（纯函数）；后续以显式 `options`/窄接口扩展，不引入全局可变状态 | 参考 `PrimitiveBuilder` |
 | ADR-005 | `Robot` 领域模块独立于 `Core`（一级目录），`Core` 永不引用领域类型 | 领域/框架边界；将来可独立拆包 |
@@ -44,6 +44,7 @@
 | ADR-013 | 提供**双 API 面**：① 组件面（`RobotModel`/`RobotViewport`/`Sink`，开箱即用）② 图形内核面（`MeshData`/`PrimitiveBuilder`/`MeshImporter`/`Scene`/`Camera` 等，供特殊处理） | 组件面服务工控集成，内核面保留高级自由度；同库同进程，组件面构建于内核面之上 |
 | ADR-014 | 3D 模型文件解析（STL/OBJ/… → `MeshData`）属 **Core** 纯 CPU 引擎能力，放 `Core/Geometry/Import`，与机器人/渲染无关 | 模型加载与 URDF 解耦；STL 手写，DAE/glTF 可选封装 AssimpNet；`IAssetResolver` 仍留在 Robot/Urdf 消费 URDF 路径语义 |
 | ADR-015 | **GameObject 数据化**：节点只持 CPU `MeshData`/`MaterialData`，不管理 GPU 资源；`Renderer` 在渲染时实例化 GPU 并缓存 | 创建机器人/场景对象不需要任何渲染上下文；GPU 生命周期归 Renderer；领域层零渲染依赖 |
+| ADR-016 | 基础图元以 **GameObject 派生类**（`Box`/`Sphere`/`Cylinder`/`Capsule`/`GroundPlane`）暴露；网格生成逻辑收敛于 `internal Primitives`（非公共 API） | **取代 ADR-004 的公共静态生成器**：图元即对象（`new Box(...)` 直接 `scene.Add`），URDF 与宿主共用同一对象模型；生成逻辑仍集中一处且可复用；原静态 `PrimitiveBuilder` 已删除 |
 
 ## 2.1 范围边界（In / Out of Scope）
 
@@ -53,7 +54,7 @@
 - 3D 模型文件导入（STL/OBJ/… → `MeshData`，`Core/Geometry/Import`）；
 - 渲染显示能力：图元/模型/线条/点云/坐标轴等可视化原语；
 - 相机：数学状态 + 轨道命令（`Rotate/Pan/Zoom/Reset`）；
-- 数据接口：`RobotModel`（静态 Parse/ParseFile + Instantiate）、`IVisualizationSink`（任意线程 Push、句柄管理）；
+- 数据接口：`RobotModel`（静态 Parse/ParseFile → 完整机器人 GameObject 树）、`IVisualizationSink`（任意线程 Push、句柄管理）；
 - 渲染后端抽象与宿主所需的"渲染表面"控件外壳（Avalonia/WPF，M6）。
 
 **Out（宿主 UI 框架职责）：**
@@ -70,30 +71,38 @@ RobotSimulation/                            # 仓库根
 ├── RobotSimulation.sln                     # 四个工程（依赖方向由工程引用强制）
 ├── src/
 │   ├── Core/          RobotSimulation.Core.csproj      # 引擎内核（领域无关，禁止引用 Robot/OpenGL）
-│   │   ├── Geometry/                         # 纯 CPU 几何（已就位）
-│   │   │   ├── MeshData.cs                   # 顶点并行存储 + 交错导出
-│   │   │   └── PrimitiveBuilder.cs           # Box/Sphere/Cylinder/Capsule/Plane（Z-up 图元轴）
-│   │   ├── Scene/                            # 场景图
-│   │   │   ├── GameObject.cs                 # 含 Name；支持无 Mesh 的骨架节点
-│   │   │   ├── Transform.cs                  # 父子层级（行主序/行向量约定）
-│   │   │   ├── Scene.cs                      # Add/Remove/Update（空节点不阻断子树）
-│   │   │   └── Camera.cs                     # 轨道相机（世界 Z-up）
-│   │   ├── Rendering/                        # 纯 CPU 数据描述（不引用 GL）
-│   │   │   └── MaterialData.cs               #   材质描述（MeshData 在 Geometry/）
-│   │   └── Utils/  MathUtils.cs  GameTimer.cs
+│   │   ├── Scene/                              # 场景对象模型（已就位）
+│   │   │   ├── GameObject.cs  Transform.cs     # 场景节点 + 父子层级（行主序/行向量）
+│   │   │   ├── Box.cs  Sphere.cs  Cylinder.cs  Capsule.cs  GroundPlane.cs  # GameObject 派生基础图元（Z-up 图元轴）
+│   │   │   ├── SceneGraph.cs  Light.cs  Camera.cs
+│   │   │   ├── SceneGraph.cs …（内联默认设置）          # 背景/环境光/网格属性 + AddDefaultGrid/AddDefaultLights/ApplyDefaultCamera
+│   │   │   ├── Grid.cs                               # rviz 风格线条网格地面（Line 通道）
+│   │   │   ├── Axes.cs  Arrow.cs  Curve.cs  PointCloud.cs   # 坐标系/箭头/曲线/点云（对标 rviz 基础组件）
+│   │   ├── Geometry/                           # 纯 CPU 几何（已就位）
+│   │   │   ├── MeshData.cs  VertexLayout.cs  LineData.cs  PointCloudData.cs   # 网格/顶点布局 + 线段段集 + 点集（纯 CPU）
+│   │   │   ├── Primitives.cs                   # internal：图元网格共享生成实现
+│   │   │   └── Import/                         # 模型文件导入（纯 CPU，无 GL/UI）
+│   │   │       ├── AssimpModelLoader.cs        #   STL/OBJ/DAE/glTF → LoadedModel（AssimpNet）
+│   │   │       └── LoadedModel.cs  LoadOptions.cs
+│   │   ├── Rendering/                          # 渲染数据描述 + 渲染抽象（已就位）
+│   │   │   ├── MaterialData.cs  TextureReference.cs  RenderPassKind.cs   # 材质/贴图描述 + 通道枚举
+│   │   │   └── IRenderer.cs  IRenderContext.cs
+│   │   └── Utils/  MathUtils.cs  GameTimer.cs  Logger.cs
 │   ├── Robot/         RobotSimulation.Robot.csproj     # 机器人领域（引用 Core，不被 Core 引用）
 │   │   ├── Description/  RobotDescription/Link/Joint/VisualElement/几何族（零渲染依赖）
 │   │   ├── Urdf/         UrdfParser/AssetResolver（零渲染依赖）
-│   │   ├── RobotModel.cs / RobotGameObject.cs          # URDF 单入口 → RobotGameObject(: GameObject)
+│   │   ├── RobotModel.cs                            # URDF 单入口 → RobotModel(: GameObject 树根；link/visual 子树 + 关节驱动)
 │   │   └── State/       RobotState.cs                  # headless FK（关节角 → link 全局位姿）
 │   ├── OpenGL/        RobotSimulation.OpenGL.csproj   # 渲染实现层（引用 Core；命名空间 RobotSimulation.OpenGL）
-│   │   ├── GraphicsContext.cs  ShaderCache.cs  ShaderProgram.cs
+│   │   ├── GraphicsContext.cs  ShaderProgram.cs
+│   │   ├── Shaders/                     # 标准通道 GLSL 源文件目录（Model/Line/Point/Skybox 的 .vert/.frag；嵌入式资源分发）
+│   │   ├── Resources/EmbeddedShaders.cs # 按 RenderPassKind 读取上述嵌入 GLSL（宿主零路径管理）
 │   │   ├── Mesh.cs                       # 固定布局 pos3|uv2|n3|t3，DrawElements(Triangles)
-│   │   ├── Renderer.cs                   # 遍历场景 → GPU 实例化与绘制（GL 生命周期归属本层）
+│   │   ├── Renderer.cs                   # 遍历场景 → 按 RenderPassKind 分派绘制（GL 生命周期归属本层）
 │   │   └── Material.cs  Texture2D.cs
 │   └── Host/          RobotSimulation.Host.csproj      # exe：窗口 + 输入 + 装配（引用全部）
 │       ├── Program.cs                    # Host：窗口 + 输入（Silk.NET.Windowing）
-│       └── Assets/Shaders/Model/Standard.*             # Blinn-Phong 光照管线
+│       └── Assets/Models/                # 演示模型（URDF + mesh；标准 shader 已内嵌 OpenGL 后端）
 └── docs/                                  # 本目录：architecture.md / api.md
 ```
 
@@ -113,9 +122,9 @@ RobotSimulation/                            # 仓库根
 RobotSimulation/
 ├── src/
 │   ├── Host/                          # Host（未来可替换为 AvaloniaHost / WpfHost）
-│   │   └── Assets/Shaders/…
+│   │   └── Assets/Models/…            # 演示模型（标准 shader 由渲染后端 EmbeddedShaders 内嵌提供）
 │   ├── Core/                           # 引擎内核（领域无关，禁止引用 Robot/Visualization）
-│   │   ├── Geometry/                   # MeshData / PrimitiveBuilder /（STL 等导入）
+│   │   ├── Geometry/                   # MeshData / 图元 GameObject 类 /（STL 等导入）
 │   │   └── Import/                 # 模型文件 → MeshData（纯 CPU，无 GL/UI）
 │   │       ├── MeshImporter.cs     #   门面：按扩展名分发
 │   │       └── StlImporter.cs      #   STL（binary + ascii）
@@ -128,9 +137,8 @@ RobotSimulation/
 │   ├── Description/                # 纯数据（零渲染依赖）：RobotDescription 聚合根 +
 │   │                               #   Link/Joint/VisualElement/MaterialElement/几何族
 │   ├── Urdf/                       # UrdfParser/Options/Exception/AssetResolver（零渲染依赖）
-│   ├── RobotModel.cs / RobotGameObject.cs        # URDF 单入口：RobotModel 静态解析持有描述，
-│   │                               #   Instantiate() → RobotGameObject(: GameObject)，
-│   │                               #   与场景中其它对象平等；关节驱动内置
+│   ├── RobotModel.cs                            # URDF 单入口：RobotModel(: GameObject 树根) 读 URDF/任意描述即得整树，
+│   │                               #   scene.Add 平等；关节驱动内置
 │   └── State/                      # (M3+) RobotInstance、关节状态、句柄管理
 ├── Visualization/                  # (M4+) rviz-like Display
 │   ├── Data/                       # PointCloudData / PathData / FrameData …
@@ -159,7 +167,7 @@ Program.cs (Host) ──▶ Robot ──▶ Core
 1. `Core` 不允许引用 `Robot` / `Visualization` / 任何 UI 框架类型。
 2. `Robot/Description` 与 `Robot/Urdf` 不允许引用 `Core.Scene` / `Core.Rendering`
    （唯一引用点是纯 `System.Numerics`），从而保留 headless 复用能力。
-3. `Robot/RobotModel.Instantiate()` 构建纯数据场景对象；领域层不再感知渲染——GPU 实例化统一收敛于 `Core/Rendering/Renderer`（渲染线程）。
+3. `Robot/RobotModel`（`Parse`/`new RobotModel(description)`）构建纯数据场景对象；领域层不再感知渲染——GPU 实例化统一收敛于 `Core/Rendering/Renderer`（渲染线程）。
 4. `Visualization` 通过**句柄**管理内部对象；其 `Sink` 协议对任意来源（自身仿真、
    ROS2 桥接、回放文件）开放。
 5. 一切 `Silk.NET.*`/窗口类型只允许出现在 Host 与渲染后端实现；任何 public 签名不含它们。
@@ -170,11 +178,11 @@ Program.cs (Host) ──▶ Robot ──▶ Core
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M0 | Scene 渲染空节点修复；`GameObject.Name` | ✅ 已完成 |
-| M1 | `Core/Geometry`：MeshData + PrimitiveBuilder 五图元；同屏展示 | ✅ 已完成 |
+| M1 | `Core/GameObjects`：MeshData + 图元 GameObject 类（Box/Sphere/Cylinder/Capsule/GroundPlane）；同屏展示 | ✅ 已完成 |
 | M1.5 | 世界 Z-up（Camera/Plane/demo）；rviz 风格鼠标（左旋/中移/右缩） | ✅ 已完成 |
 | M2 | `Robot/Description` + `Robot/Urdf` 解析 + `RobotModel` 静态解析门面 + 控制台验证 | ✅ 已完成 |
 | M2.5 | `Core/Geometry/Import`：STL importer（binary+ascii）→ `MeshData`；`MeshImporter` 门面 | ⬜ |
-| M3 | `RobotModel.Instantiate() → RobotGameObject`（单个 GameObject，纯数据无渲染参数，scene.Add 平等）+ 关节驱动 demo | ✅ 已完成 |
+| M3 | `RobotModel : GameObject`（读 URDF/任意描述即得完整树；单个 GameObject，纯数据无渲染参数，scene.Add 平等）+ 关节驱动 demo | ✅ 已完成 |
 | M3.5 | 渲染数据化：`GameObject` 只持 `MeshData`/`MaterialData`（CPU），新增 `Renderer` 负责 GPU 实例化与绘制 | ✅ 已完成 |
 | M4 | `Visualization`：线条/点云数据通道 + `IVisualizationSink`（rviz 内核雏形） | ⬜ |
 | M5 | `Core.Rendering` 抽象化（`IRenderDevice` 族），Silk/GL 收进实现层 | ⬜ |

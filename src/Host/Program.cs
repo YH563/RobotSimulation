@@ -3,84 +3,45 @@ using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using Silk.NET.OpenGL;
 using System.Numerics;
-using RobotSimulation.Core.GameObjects;
+using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Scene;
 using RobotSimulation.Core.Utils;
 using RobotSimulation.OpenGL.Device;
 using RobotSimulation.OpenGL.Rendering;
 using RobotSimulation.Robot;
-using RobotSimulation.Robot.Description;
+using RobotSimulation.Robot.Urdf;
 
 namespace RobotSimulation;
 
 public class Program
 {
-    private static IWindow _window;
-    // 对外只用接口类型；具体后端（GraphicsContext/Renderer）仅在 OnLoad 组装根中创建
-    private static IRenderContext _graphics;
-    private static SceneGraph _scene;
-    private static GameTimer _gameTimer;
-    private static RobotGameObject _robot;
-    private static IRenderer _renderer;
-    private static float _demoTime;
-    // rviz 风格鼠标控制参数（若仍觉方向/手感不对，可只改这里的符号或灵敏度）
-    private const float RotateSpeed = 0.2f;      // 旋转：度/像素
-    private const float PanScale = 0.01f;        // 平移：目标位移比例
-    private const float ZoomDragSpeed = 0.03f;   // 右键上下拖拽缩放：距离/像素
-    private const float ZoomScrollSpeed = 0.5f;  // 滚轮缩放：距离/刻度
+    private static IWindow _window = null!;
 
-    /// <summary>演示用 URDF：转台式机械臂（revolute 转台 + prismatic 滑块）。</summary>
-    private const string DemoUrdf = """
-        <robot name="demo_arm">
-          <link name="base_link">
-            <visual>
-              <origin xyz="0 0 0.1"/>
-              <geometry><box size="0.32 0.32 0.2"/></geometry>
-              <material name="base_mat"/>
-            </visual>
-          </link>
-          <joint name="j_yaw" type="revolute">
-            <parent link="base_link"/>
-            <child link="turntable"/>
-            <origin xyz="0 0 0.2"/>
-            <axis xyz="0 0 1"/>
-          </joint>
-          <link name="turntable">
-            <visual>
-              <origin xyz="0 0 0.03"/>
-              <geometry><cylinder radius="0.14" length="0.06"/></geometry>
-            </visual>
-            <visual>
-              <origin xyz="0.28 0 0.03" rpy="0 1.5707963 0"/>
-              <geometry><cylinder radius="0.02" length="0.56"/></geometry>
-              <material name="arm_mat"/>
-            </visual>
-          </link>
-          <joint name="j_lift" type="prismatic">
-            <parent link="turntable"/>
-            <child link="slider"/>
-            <origin xyz="0.28 0 0.06"/>
-            <axis xyz="0 0 1"/>
-          </joint>
-          <link name="slider">
-            <visual>
-              <origin xyz="0 0 0.1"/>
-              <geometry><box size="0.05 0.05 0.2"/></geometry>
-              <material name="slider_mat"/>
-            </visual>
-          </link>
-          <material name="base_mat"><color rgba="0.85 0.35 0.15 1"/></material>
-          <material name="arm_mat"><color rgba="0.3 0.55 0.9 1"/></material>
-          <material name="slider_mat"><color rgba="0.95 0.85 0.1 1"/></material>
-        </robot>
-        """;
+    // 对外只用接口类型；具体后端（GraphicsContext/Renderer）仅在 OnLoad 组装根中创建
+    private static IRenderContext _graphics = null!;
+    private static SceneGraph _scene = null!;
+    private static GameTimer _gameTimer = null!;
+    private static RobotModel? _robot;
+    private static IRenderer _renderer = null!;
+    private static string? _urdfPath;
+
+    // rviz 风格鼠标控制参数（若仍觉方向/手感不对，可只改这里的符号或灵敏度）
+    private const float RotateSpeed = 0.2f; // 旋转：度/像素
+    private const float PanScale = 0.01f; // 平移：目标位移比例
+    private const float ZoomDragSpeed = 0.03f; // 右键上下拖拽缩放：距离/像素
+    private const float ZoomScrollSpeed = 0.5f; // 滚轮缩放：距离/刻度
 
     private static Vector2 _lastMousePos;
     private static bool _isDragging = false;
 
     public static void Main(string[] args)
     {
+        // Assimp 原生运行环境准备（Linux 下补 libdl 兼容链接；须早于任何 mesh 导入调用）
+        AssimpNative.EnsureRuntime();
+        // URDF 定位：命令行参数优先，否则在默认 Assets/Models 下递归查找（逻辑归 Robot 的 UrdfLocator）
+        _urdfPath = UrdfLocator.Find(args is { Length: > 0 } ? args[0] : null);
+
         try
         {
             var options = WindowOptions.Default with
@@ -98,7 +59,7 @@ public class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Unhandled exception: {ex}");
+            Logger.Error(ex);
             Console.ReadLine();
         }
     }
@@ -106,43 +67,51 @@ public class Program
     private static void OnLoad()
     {
         // 渲染上下文：GL 实例仅在宿主组装根创建并注入，之后只经 IRenderContext 使用
-        GL gl = _window.CreateOpenGL();                // Host 唯一允许接触 GL 的位置
-        var graphics = new GraphicsContext(gl);        // 具体后端类型只在组装根出现
+        GL gl = _window.CreateOpenGL(); // Host 唯一允许接触 GL 的位置
+        var graphics = new GraphicsContext(gl); // 具体后端类型只在组装根出现
         _graphics = graphics;
         _scene = new SceneGraph();
 
         _graphics.Resized += (w, h) => _scene.Camera.AspectRatio = w / (float)h;
         _graphics.Resize(_window.Size.X, _window.Size.Y);
 
-        // 光源：作为 GameObject 加入场景（可多个，Renderer 会把它们传入 shader）
-        var keyLight = new Light("key_light")
+        // 默认场景环境（网格地面 / 默认灯光 / 世界坐标轴 / 相机姿态）由 SceneGraph 构造时自动装配，
+        // 这里无需手动调用。
+
+        // 渲染器：GPU 网格/材质只存在于它内部（Scene/GameObject 均为纯数据）；
+        // 标准通道着色器（模型/线条/点云/天空）内嵌于 OpenGL 后端，宿主无需指定路径
+        _renderer = new Renderer(graphics);
+
+        // ---- URDF 机器人：加载命令行指定或 Assets/Models 下的第一个 .urdf 并显示 ----
+        if (_urdfPath is { } modelPath)
         {
-            Color = new Vector3(1f, 1f, 1f),
-            Intensity = 1f,
-        };
-        keyLight.Transform.Position = new Vector3(4, 5, 10);   // Z-up：光源置于地面上方
-        _scene.Add(keyLight);
+            Logger.Info($"加载模型：{modelPath}");
+            _robot = RobotModel.ParseFile(modelPath); // 路径解析走 Robot 默认 FileSystemAssetResolver（找不到会直接报错）
+            Logger.Info(
+                $"'{_robot.RobotName}': links={_robot.Description.Links.Count}, joints={_robot.Description.Joints.Count}");
+            _scene.Add(_robot); // 与其它 GameObject 平等地加入场景，由渲染器统一绘制
+        }
+        else
+        {
+            Logger.Warning("未指定 URDF。用法：RobotSimulation.Host <model.urdf>，或把 .urdf 放入 Assets/Models/ 后运行。");
+        }
 
-        // 渲染器：GPU 网格/材质只存在于它内部（Scene/GameObject 均为纯数据）
-        _renderer = new Renderer(
-            graphics,
-            "Assets/Shaders/Model/Standard.vert",
-            "Assets/Shaders/Model/Standard.frag");
+        // ---- 最小示例内容：往场景里加几个可见对象（默认网格/灯光/世界坐标轴已由 SceneGraph 构造自动装配）----
+        var demoCurve = new List<Vector3>();
+        for (int i = 0; i <= 64; i++)
+        {
+            float t = i / 64f * MathF.PI * 4f;
+            demoCurve.Add(new Vector3(
+                -1.2f + 0.5f * MathF.Cos(t),
+                -1.2f + 0.5f * MathF.Sin(t),
+                0.25f + 0.2f * MathF.Sin(t * 2f)));
+        }
 
-        // ---- 地面（世界 Z-up；图元也是纯数据）----
-        AddPrimitive(_scene, PrimitiveBuilder.CreatePlane(6f, 6f),
-            new Vector4(0.62f, 0.62f, 0.68f, 1f), "Ground", Vector3.Zero);
+        _scene.Add(new Curve(demoCurve, new Vector4(0.2f, 0.8f, 1f, 1f), "demo-curve"));
 
-        // ---- URDF 机器人：解析 → 创建 GameObject（纯数据，无任何渲染参数）----
-        RobotModel robot = RobotModel.Parse(DemoUrdf);
-        Console.WriteLine($"[URDF] '{robot.Name}': links={robot.Description.Links.Count}, joints={robot.Description.Joints.Count}");
-        _robot = robot.Instantiate();
-        _scene.Add(_robot);   // 与其它 GameObject 平等地加入场景，由渲染器统一绘制
-
-        // 相机看向机器人
-        _scene.Camera.Target = new Vector3(0f, 0f, 0.35f);
-        _scene.Camera.Distance = 4.5f;
-        _scene.Camera.Pitch = 20f;
+        var demoArrow = new Arrow(0.5f, 0.015f, 0.05f, 0.12f, new Vector4(1f, 0.62f, 0.1f, 1f), 24, "demo-arrow");
+        demoArrow.Transform.Position = new Vector3(-1.2f, 1.2f, 0f);
+        _scene.Add(demoArrow);
 
         var input = _window.CreateInput();
         foreach (var kb in input.Keyboards)
@@ -167,15 +136,9 @@ public class Program
 
     private static void OnRender(double deltaTime)
     {
-        // 演示：每帧驱动 URDF 机器人关节（转台往复旋转 + 末端滑块升降）
-        _demoTime += (float)deltaTime;
-        if (_robot != null)
-        {
-            _robot.SetJointValue("j_yaw", MathF.Sin(_demoTime * 1.1f) * 0.9f);
-            _robot.SetJointValue("j_lift", (MathF.Sin(_demoTime * 2.4f) + 1f) * 0.06f);
-        }
+        // 模型静止显示（不添加自动动画）；需要驱动时由外部调用 robot.SetJointValue(...)
 
-        _graphics.Clear(new Vector4(0.392f, 0.584f, 0.929f, 1f)); // CornflowerBlue
+        _graphics.Clear(_scene.BackgroundColor); // 背景色来自场景默认显示设置（中等灰）
         _renderer.Render(_scene);
     }
 
@@ -189,7 +152,7 @@ public class Program
     {
         _gameTimer?.Stop();
         _gameTimer?.Dispose();
-        _renderer?.Dispose();   // GPU 资源统一在此释放
+        _renderer?.Dispose(); // GPU 资源统一在此释放
         _scene?.Dispose();
         _graphics?.Dispose();
     }
@@ -198,7 +161,12 @@ public class Program
     //   左键拖拽 = 旋转视角    中键拖拽 = 平移    右键拖拽 = 缩放（上放大/下缩小）    滚轮 = 缩放
     private static void OnKeyDown(IKeyboard keyboard, Key key, int code)
     {
-        if (key == Key.Escape) _window.Close();
+        if (key == Key.Escape)
+            _window.Close();
+        else if (key == Key.W)
+            _scene.Camera.Zoom(0.6f); // W = 拉近（备用缩放，避免依赖滚轮）
+        else if (key == Key.S)
+            _scene.Camera.Zoom(-0.6f); // S = 拉远
     }
 
     private static void OnMouseDown(IMouse mouse, MouseButton button)
@@ -234,19 +202,10 @@ public class Program
 
     private static void OnMouseScroll(IMouse mouse, ScrollWheel scroll)
     {
-        _scene.Camera.Zoom(scroll.Y * ZoomScrollSpeed);
-    }
+        float dy = scroll.Y != 0f ? scroll.Y : scroll.X; // 兼容部分平台把垂直滚动放 X
+        if (dy == 0f)
+            return;
 
-    // ---- 场景对象摆放（数据化：MeshData + MaterialData，无 GPU 上传）----
-
-    /// <summary>
-    /// 用图元数据创建带材质描述的 GameObject 并加入场景；GPU 上传由 Renderer 在绘制时完成。
-    /// </summary>
-    private static void AddPrimitive(SceneGraph scene, MeshData data, Vector4 color, string name, Vector3 position)
-    {
-        var material = new MaterialData { BaseColor = color };
-        var go = new GameObject(data, material, name);
-        go.Transform.Position = position;
-        scene.Add(go);
+        _scene.Camera.Zoom(dy * ZoomScrollSpeed);
     }
 }

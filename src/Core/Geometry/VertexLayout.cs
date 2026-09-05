@@ -1,4 +1,4 @@
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
 /// 交错顶点布局的单一事实来源（pos3 | uv2 | normal3 | tangent3，共 11 个 float）。

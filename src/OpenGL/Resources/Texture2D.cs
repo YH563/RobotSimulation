@@ -2,13 +2,13 @@ using Silk.NET.OpenGL;
 using StbImageSharp;
 using System;
 using System.IO;
-using RobotSimulation.Core.GameObjects;
+using RobotSimulation.Core.Rendering;
 
 namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
 /// 2D纹理类，可以兼容不同类型的纹理。
-/// 颜色空间语义见 Core.GameObjects.TextureColorSpace（Srgb 需伽马校正 / Linear 纯数值）。
+/// 颜色空间语义见 Core.Rendering.TextureColorSpace（Srgb 需伽马校正 / Linear 纯数值）。
 /// </summary>
 public class Texture2D : IDisposable
 {

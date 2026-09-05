@@ -1,0 +1,80 @@
+using RobotSimulation.Core.Geometry;
+using Silk.NET.OpenGL;
+using System;
+
+namespace RobotSimulation.OpenGL.Resources;
+
+/// <summary>
+/// GPU 线条缓冲（GL_LINES：每两个顶点一条线段），对应 Core 的 <see cref="LineData"/>。
+/// 位置在 attribute 0；若数据带逐顶点颜色则同时上传到 attribute 1，
+/// 否则由 Line 通道着色器使用 uniform uColor 统一上色。
+/// </summary>
+public sealed class LineMesh : IDisposable
+{
+    private readonly GL _gl;
+    private readonly uint _vao, _vbo, _colorVbo;
+    private readonly uint _vertexCount;
+    private bool _disposed;
+
+    public LineMesh(GL gl, LineData data)
+    {
+        _gl = gl ?? throw new ArgumentNullException(nameof(gl));
+        _vertexCount = (uint)data.VertexCount;
+        float[] positions = data.ToPositionArray();
+        float[]? colors = data.ToColorArray();
+
+        _vao = gl.GenVertexArray();
+        gl.BindVertexArray(_vao);
+
+        _vbo = gl.GenBuffer();
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        unsafe
+        {
+            fixed (float* ptr = positions)
+                gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(positions.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+        }
+        gl.EnableVertexAttribArray(0);
+        unsafe
+        {
+            gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+        }
+
+        _colorVbo = colors is null ? 0 : SetupColors(gl, colors);
+
+        gl.BindVertexArray(0);
+    }
+
+    private uint SetupColors(GL gl, float[] colors)
+    {
+        uint buffer = gl.GenBuffer();
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, buffer);
+        unsafe
+        {
+            fixed (float* ptr = colors)
+                gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(colors.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+        }
+        gl.EnableVertexAttribArray(1);
+        unsafe
+        {
+            gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 4 * sizeof(float), (void*)0);
+        }
+        return buffer;
+    }
+
+    public void Draw()
+    {
+        _gl.BindVertexArray(_vao);
+        _gl.DrawArrays(PrimitiveType.Lines, 0, _vertexCount);
+        _gl.BindVertexArray(0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        if (_vao != 0) _gl.DeleteVertexArray(_vao);
+        if (_vbo != 0) _gl.DeleteBuffer(_vbo);
+        if (_colorVbo != 0) _gl.DeleteBuffer(_colorVbo);
+        _disposed = true;
+    }
+}
+

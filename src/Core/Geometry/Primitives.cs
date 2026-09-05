@@ -1,16 +1,17 @@
 using System;
 using System.Numerics;
 
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// 基本图元网格生成器（纯 CPU，不依赖 GL）。
+/// 基本图元网格的共享生成实现（internal，非公共 API）：图元 GameObject 派生类
+/// （Box / Sphere / Cylinder / Capsule / GroundPlane）在构造时调用本类静态方法。
 /// 输出约定：
-///  - 全部为"局部坐标"网格；圆柱/胶囊/球体的回转轴沿 +Z（与 URDF/ROS 几何语义一致）；
-///  - 三角形一律保证"从外表面看为 CCW"，可直接配合 CullFace.Back 渲染；
+///  - 全部为“局部坐标”网格；圆柱/胶囊/球体的回转轴沿 +Z（与 URDF/ROS 几何语义一致）；
+///  - 三角形一律保证“从外表面看为 CCW”，可直接配合 CullFace.Back 渲染；
 ///  - 顶点格式为 MeshData：pos(3) + uv(2) + normal(3) + tangent(3)。
 /// </summary>
-public static class PrimitiveBuilder
+internal static class Primitives
 {
     // ---- 参数校验 ----
 
@@ -58,7 +59,7 @@ public static class PrimitiveBuilder
     /// <summary>
     /// 生成立方体，尺寸分别对应 x/y/z 轴宽度。每面 4 个独立顶点，法线为硬边面法线。
     /// </summary>
-    public static MeshData CreateBox(float width, float height, float depth)
+    internal static MeshData CreateBox(float width, float height, float depth)
     {
         EnsurePositive(nameof(width), width);
         EnsurePositive(nameof(height), height);
@@ -105,7 +106,7 @@ public static class PrimitiveBuilder
     /// 生成经纬球（UV 球）。极点行的每"列"是独立顶点，便于纹理沿经线闭合。
     /// <paramref name="segments"/> 为圆周分段数，<paramref name="rings"/> 为纬线分段数。
     /// </summary>
-    public static MeshData CreateSphere(float radius, int segments = 32, int rings = 16)
+    internal static MeshData CreateSphere(float radius, int segments = 32, int rings = 16)
     {
         EnsurePositive(nameof(radius), radius);
         EnsureAtLeast(nameof(segments), segments, 3);
@@ -198,7 +199,7 @@ public static class PrimitiveBuilder
     /// 生成圆柱：回转轴沿 +Z（URDF/ROS 语义），高为 <paramref name="length"/>。
     /// 侧面平滑共享法线；顶/底盖使用各自独立的硬边法线（±Z）。
     /// </summary>
-    public static MeshData CreateCylinder(float radius, float length, int segments = 32)
+    internal static MeshData CreateCylinder(float radius, float length, int segments = 32)
     {
         EnsurePositive(nameof(radius), radius);
         EnsurePositive(nameof(length), length);
@@ -301,7 +302,7 @@ public static class PrimitiveBuilder
     /// 生成胶囊体：回转轴沿 +Z（URDF/ROS 语义）。<paramref name="length"/> 为中间
     /// 圆柱段长度（不含两端半球帽），总高 = length + 2·radius。
     /// </summary>
-    public static MeshData CreateCapsule(float radius, float length, int segments = 32, int rings = 8)
+    internal static MeshData CreateCapsule(float radius, float length, int segments = 32, int rings = 8)
     {
         EnsurePositive(nameof(radius), radius);
         EnsurePositive(nameof(length), length);
@@ -451,6 +452,61 @@ public static class PrimitiveBuilder
     }
 
     // =====================================================================
+    // 圆锥（Arrow 箭头等使用；轴沿 +Z，与 URDF/ROS 语义一致）
+    // =====================================================================
+
+    /// <summary>
+    /// 生成圆锥：回转轴沿 +Z，底面（半径 <paramref name="radius"/>）位于 z = -height/2，
+    /// 顶点位于 +height/2。底面封口、侧面含法线。
+    /// </summary>
+    internal static MeshData CreateCone(float radius, float height, int segments = 24)
+    {
+        EnsurePositive(nameof(radius), radius);
+        EnsurePositive(nameof(height), height);
+        EnsureAtLeast(nameof(segments), segments, 3);
+
+        var mesh = new MeshData();
+        float side = MathF.Atan2(radius, height);   // 侧面与水平面的倾角 → 法线
+        float cosSide = MathF.Cos(side);
+        float sinSide = MathF.Sin(side);
+
+        // 底面环
+        var ring = new uint[segments];
+        for (int i = 0; i < segments; i++)
+        {
+            float a = i / (float)segments * MathF.Tau;
+            float c = MathF.Cos(a), s = MathF.Sin(a);
+            ring[i] = mesh.AddVertex(
+                new Vector3(radius * c, radius * s, -height * 0.5f),
+                new Vector3(c * cosSide, s * cosSide, sinSide),
+                new Vector2(i / (float)segments, 0f),
+                new Vector3(-s, c, 0f));
+        }
+
+        uint apex = mesh.AddVertex(new Vector3(0f, 0f, height * 0.5f), Vector3.UnitZ, new Vector2(0.5f, 1f), Vector3.UnitX);
+
+        // 侧面（外法线参考：环上当前顶点的斜向法线）
+        for (int i = 0; i < segments; i++)
+        {
+            uint next = ring[(i + 1) % segments];
+            float ai = i / (float)segments * MathF.Tau;
+            Vector3 outward = new Vector3(
+                MathF.Cos(ai) * cosSide, MathF.Sin(ai) * cosSide, sinSide);
+            AddOrientedTriangle(mesh, apex, next, ring[i], outward);
+        }
+
+        // 底面封口（朝 -Z）
+        uint center = mesh.AddVertex(new Vector3(0f, 0f, -height * 0.5f), -Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
+        for (int i = 0; i < segments; i++)
+        {
+            uint next = ring[(i + 1) % segments];
+            AddOrientedTriangle(mesh, ring[i], next, center, -Vector3.UnitZ);
+        }
+
+        return mesh;
+    }
+
+    // =====================================================================
     // 平面
     // =====================================================================
 
@@ -458,7 +514,7 @@ public static class PrimitiveBuilder
     /// 生成水平地面：位于 XY 平面（z = 0），法线朝 +Z，宽 <paramref name="width"/>（沿 X）、
     /// 深 <paramref name="depth"/>（沿 Y）。用于 Z-up 引擎（与 URDF/ROS 世界约定一致）。
     /// </summary>
-    public static MeshData CreatePlane(float width, float depth)
+    internal static MeshData CreatePlane(float width, float depth)
     {
         EnsurePositive(nameof(width), width);
         EnsurePositive(nameof(depth), depth);

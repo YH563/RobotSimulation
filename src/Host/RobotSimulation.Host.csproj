@@ -22,9 +22,13 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Content Include="Assets\**\**\*.*">
+        <Content Include="Assets\**\*.*">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Assets\Models\fairino3_v6\" />
     </ItemGroup>
 
 </Project>

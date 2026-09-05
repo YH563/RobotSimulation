@@ -1,4 +1,4 @@
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Rendering;
 
 /// <summary>
 /// 贴图颜色空间语义（纯数据，与具体渲染 API 无关）。

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Numerics;
 
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
 /// CPU 侧网格数据：顶点属性按 位置/法线/UV/切线 并行存储，外加索引缓冲。

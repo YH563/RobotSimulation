@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Rendering;
 
 /// <summary>
 /// 材质描述（CPU 侧数据），挂在 GameObject 上描述外观与渲染状态。
@@ -41,5 +41,8 @@ public sealed class MaterialData
 
     /// <summary>是否以线框模式绘制。</summary>
     public bool Wireframe { get; set; }
+
+    /// <summary>所属渲染通道（默认模型通道）。Line/Point 等通道用于网格地面、坐标轴、点云等。</summary>
+    public RenderPassKind PassKind { get; set; } = RenderPassKind.Model;
 }
 

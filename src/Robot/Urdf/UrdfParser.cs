@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Xml.Linq;
+using RobotSimulation.Core.Utils;
 using RobotSimulation.Robot.Description;
 
 namespace RobotSimulation.Robot.Urdf;
@@ -15,7 +16,7 @@ namespace RobotSimulation.Robot.Urdf;
 /// 职责与范围：
 ///  - 只覆盖可视化：robot / link / visual / geometry / material / joint（拓扑）；
 ///  - 忽略 inertial / collision / transmission / gazebo 等物理与扩展内容；
-///  - 位姿统一合成为行主序矩阵（与 Core.GameObjects.Transform 约定一致）；
+///  - 位姿统一合成为行主序矩阵（与 Core.Scene.Transform 约定一致）；
 ///  - 数值一律 InvariantCulture 解析（URDF 小数点恒为 '.'）。
 /// </summary>
 internal sealed class UrdfParser
@@ -126,7 +127,7 @@ internal sealed class UrdfParser
             if (materials.TryGetValue(name, out MaterialElement? existing))
                 return existing;
 
-            Console.WriteLine($"[URDF] 警告：visual 引用了未定义的材质 '{name}'，将使用默认外观。");
+            Logger.Warning($"visual 引用了未定义的材质 '{name}'，将使用默认外观。");
             return null;
         }
 
@@ -278,12 +279,16 @@ internal sealed class UrdfParser
             ? Vector3.Zero
             : ReadVector3(element, "rpy");
 
-        // URDF origin 为固定轴 XYZ（R = Rz(yaw)·Ry(pitch)·Rx(roll)）：
-        // .NET 的 CreateFromYawPitchRoll(yaw,pitch,roll) 语义一致。
+        // URDF origin 为固定轴 XYZ：先绕世界 X 转 roll，再绕世界 Y 转 pitch，最后绕世界 Z 转 yaw，
+        // 即四元数合成 q = qZ(yaw) * qY(pitch) * qX(roll)（应用顺序：roll → pitch → yaw）。
+        // 注意：不能使用 Quaternion.CreateFromYawPitchRoll —— 其参数轴约定与 URDF 不一致
+        // （实测会把 roll 误当成绕 Z 旋转），这里逐轴显式构造。
         var rotation = Matrix4x4.CreateFromQuaternion(
-            Quaternion.CreateFromYawPitchRoll(rpy.Z, rpy.Y, rpy.X));
+            Quaternion.CreateFromAxisAngle(Vector3.UnitZ, rpy.Z)
+            * Quaternion.CreateFromAxisAngle(Vector3.UnitY, rpy.Y)
+            * Quaternion.CreateFromAxisAngle(Vector3.UnitX, rpy.X));
 
-        // 行主序约定：与 Core.GameObjects.Transform 一致，先旋转后平移。
+        // 行主序约定：与 Core.Scene.Transform 一致，先旋转后平移。
         return rotation * Matrix4x4.CreateTranslation(xyz);
     }
 

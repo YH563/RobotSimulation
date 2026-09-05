@@ -13,7 +13,7 @@ namespace RobotSimulation.Robot.State;
 ///  - 可驱动关节 = Revolute / Continuous / Prismatic（按 RobotDescription.Joints 顺序）；
 ///    Fixed 关节只参与链路、不占驱动位；
 ///  - 关节值单位：旋转类用弧度、平移类用米（沿 Axis 方向）；
-///  - 位姿为行主序矩阵（与 Core.GameObjects.Transform 约定一致）；
+///  - 位姿为行主序矩阵（与 Core.Scene.Transform 约定一致）；
 ///    <see cref="GetLinkGlobalPose"/> 的结果可直接写入 GameObject.Transform 或供其它系统消费；
 ///  - 非线程安全：假定单线程使用；需要跨线程推送时由上层（Sink）做快照。
 /// </summary>

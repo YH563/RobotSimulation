@@ -41,6 +41,6 @@ public sealed record CapsuleGeometry(float Radius, float Length) : GeometryEleme
 /// <param name="Uri">
 /// URDF 中原始引用串（可为相对路径或 package:// 形式）。
 /// 本层只记录引用、不解析文件；由渲染/导入层经 IAssetResolver 解析后交给
-/// Core/GameObjects/Import 生成 MeshData。
+/// Core/Geometry/Import 生成 MeshData。
 /// </param>
 public sealed record MeshGeometry(string Uri) : GeometryElement;

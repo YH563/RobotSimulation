@@ -1,8 +1,7 @@
 using System.Collections.Generic;
 using System.Numerics;
-using RobotSimulation.Core.Utils;
 
-namespace RobotSimulation.Core.GameObjects;
+namespace RobotSimulation.Core.Scene;
 
 public class Transform
 {
