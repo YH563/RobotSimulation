@@ -1,3 +1,4 @@
+using System.Numerics;
 using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Rendering;
@@ -28,9 +29,12 @@ public class GameObject
     public LineData? LineData { get; set; }
 
     /// <summary>
-    /// 点集数据（CPU，配合 <see cref="MaterialData.PassKind"/> = Point 使用，点云等）。
+    /// Point data (CPU, used with <see cref="MaterialData.PassKind"/> = Point, e.g. point clouds).
     /// </summary>
-    public PointCloudData? PointData { get; set; }
+    public PointCloud2Data? PointData { get; set; }
+
+    /// <summary>Rendering size (in pixels) for GL_POINTS; used by the Point pass.</summary>
+    public float PointSize { get; set; } = 3f;
 
     /// <summary>
     /// 本节点的局部坐标系（子对象方式）：开启时在其 Transform 下挂一个 RGB 小坐标轴，
@@ -71,6 +75,16 @@ public class GameObject
     public MaterialData? MaterialData { get; set; }
 
     public bool Visible { get; set; } = true;
+
+    /// <summary>
+    /// 是否高亮（默认 false）。渲染器对高亮节点做一件事：最终颜色向 <see cref="HighlightColor"/>
+    /// 混合（tint），用于点选后的选中视觉反馈。默认关闭；机器人（<c>RobotModel</c>）默认不高亮，
+    /// 由宿主在鼠标命中时经 <see cref="SceneGraph.PickAndHighlight"/> 置为 true。
+    /// </summary>
+    public bool Highlighted { get; set; }
+
+    /// <summary>高亮颜色（<see cref="Highlighted"/> 为 true 时由渲染后端读取，仅 CPU 数据）。</summary>
+    public Vector4 HighlightColor { get; set; } = new(1f, 0.72f, 0.16f, 1f);
 
     /// <summary>
     /// 是否参与射线拾取（<see cref="SceneGraph.Pick"/>）。默认 true。

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Numerics;
 using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
@@ -7,40 +8,50 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 点云（<see cref="GameObject"/>，Point 通道）：显示一批三维点。v1 使用单色 + 统一点大小；
-/// 数据更新走 <see cref="SetPoints"/>（每次替换内部 <see cref="PointCloudData"/> 并重新上传）。
+/// A point cloud (<see cref="GameObject"/> on the Point pass) that renders a set of 3D points.
+/// By default it draws one color with a uniform size; the color can come from the material
+/// (<see cref="MaterialData.BaseColor"/>) or, when the backing data carries per-point colors,
+/// from the cloud itself (see <see cref="PointCloud2Data.HasColor"/>).
+/// Data is either built on the fly via <see cref="SetPoints"/>, set directly via
+/// <see cref="SetData"/>, or loaded from a file with <see cref="FromFile"/> (.pcd / .ply).
 /// </summary>
 public sealed class PointCloud : GameObject
 {
-    private float _pointSize;
-
-    /// <summary>点大小（像素）。</summary>
-    public float PointSize
-    {
-        get => _pointSize;
-        set => _pointSize = value;
-    }
-
-    public PointCloud(float pointSize = 3f, Vector4? color = null, string? name = null)
+    public PointCloud(float pointSize = 3f, Vector4? color = null, string? name = null,
+        PointCloud2Data? data = null)
         : base(null, null, name ?? nameof(PointCloud))
     {
-        _pointSize = pointSize;
         MaterialData = new MaterialData
         {
             PassKind = RenderPassKind.Point,
             BaseColor = color ?? new Vector4(0.95f, 0.4f, 0.2f, 1f),
         };
-        PointData = new PointCloudData { PointSize = pointSize };
+        PointSize = pointSize;
+        PointData = data ?? PointCloud2Data.FromPositions(Array.Empty<Vector3>());
     }
 
-    /// <summary>替换点集内容（每次调用产生新的 CPU 数据并触发一次 GPU 上传）。</summary>
+    /// <summary>Replaces the point set from a list of positions (no per-point colors).</summary>
     public void SetPoints(IEnumerable<Vector3> points)
     {
         if (points is null)
             throw new ArgumentNullException(nameof(points));
+        PointData = PointCloud2Data.FromPositions(points);
+    }
 
-        var data = new PointCloudData { PointSize = PointSize };
-        data.SetPoints(points);
+    /// <summary>Replaces the backing point data (e.g. a loaded or self-built structured cloud).</summary>
+    public void SetData(PointCloud2Data data)
+    {
+        if (data is null)
+            throw new ArgumentNullException(nameof(data));
         PointData = data;
+    }
+
+    /// <summary>Loads a point cloud from a file (.pcd / .ply) and wraps it as a scene object.</summary>
+    public static PointCloud FromFile(string path, float pointSize = 3f, Vector4? color = null, string? name = null)
+    {
+        if (path is null)
+            throw new ArgumentNullException(nameof(path));
+        PointCloud2Data data = PointCloudIo.Load(path);
+        return new PointCloud(pointSize, color, name ?? Path.GetFileNameWithoutExtension(path), data);
     }
 }

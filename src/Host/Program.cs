@@ -11,6 +11,9 @@ using RobotSimulation.OpenGL.Device;
 using RobotSimulation.OpenGL.Rendering;
 using RobotSimulation.Robot;
 using RobotSimulation.Robot.Urdf;
+using System.Buffers.Binary;
+using System.IO;
+using RobotSimulation.Core.Geometry;
 
 namespace RobotSimulation;
 
@@ -25,6 +28,7 @@ public class Program
     private static RobotModel? _robot;
     private static IRenderer _renderer = null!;
     private static string? _urdfPath;
+    private static string? _cloudPath;
 
     // rviz 风格鼠标控制参数（若仍觉方向/手感不对，可只改这里的符号或灵敏度）
     private const float RotateSpeed = 0.2f; // 旋转：度/像素
@@ -35,12 +39,19 @@ public class Program
     private static Vector2 _lastMousePos;
     private static bool _isDragging = false;
 
+    // ---- 点选拾取（左键单击选中，拖拽仍是旋转视角）----
+    private static Vector2 _mouseDownPos;         // 左键按下时的屏幕位置
+    private static bool _didDrag;                 // 按下后是否发生明显拖拽（用于区分 点击/拖拽）
+    private static GameObject? _selected;         // 当前选中对象（单选：命中即替换，未命中清空）
+    private const float ClickDragThreshold = 6f;  // 判定拖拽的位移阈值（像素）
+
     public static void Main(string[] args)
     {
         // Assimp 原生运行环境准备（Linux 下补 libdl 兼容链接；须早于任何 mesh 导入调用）
         AssimpNative.EnsureRuntime();
         // URDF 定位：命令行参数优先，否则在默认 Assets/Models 下递归查找（逻辑归 Robot 的 UrdfLocator）
         _urdfPath = UrdfLocator.Find(args is { Length: > 0 } ? args[0] : null);
+        _cloudPath = args is { Length: > 1 } ? args[1] : null;
 
         try
         {
@@ -113,6 +124,18 @@ public class Program
         demoArrow.Transform.Position = new Vector3(-1.2f, 1.2f, 0f);
         _scene.Add(demoArrow);
 
+        // ---- Point cloud demo (PointCloud2-style field layout + per-point colors) ----
+        _scene.Add(BuildDemoCloud());
+
+        // Optional: render a point cloud loaded from a file (second CLI argument, .pcd / .ply).
+        if (_cloudPath is { } cloudPath)
+        {
+            if (File.Exists(cloudPath))
+                _scene.Add(PointCloud.FromFile(cloudPath));
+            else
+                Logger.Warning($"点云文件不存在，跳过：{cloudPath}");
+        }
+
         var input = _window.CreateInput();
         foreach (var kb in input.Keyboards)
             kb.KeyDown += OnKeyDown;
@@ -174,19 +197,35 @@ public class Program
         if (button == MouseButton.Left || button == MouseButton.Middle || button == MouseButton.Right)
         {
             _isDragging = true;
-            _lastMousePos = new Vector2(mouse.Position.X, mouse.Position.Y);
+            _mouseDownPos = new Vector2(mouse.Position.X, mouse.Position.Y);
+            _didDrag = false;
+            _lastMousePos = _mouseDownPos;
         }
     }
 
     private static void OnMouseUp(IMouse mouse, MouseButton button)
     {
-        if (button == MouseButton.Left || button == MouseButton.Middle || button == MouseButton.Right)
+        if (button == MouseButton.Left)
+        {
+            // 单击（按下后未拖拽）→ 发射射线拾取选中；拖拽 → 保持旋转视角，不拾取
+            if (!_didDrag)
+                TryPickAt(new Vector2(mouse.Position.X, mouse.Position.Y));
             _isDragging = false;
+        }
+        else if (button == MouseButton.Middle || button == MouseButton.Right)
+        {
+            _isDragging = false;
+        }
     }
 
     private static void OnMouseMove(IMouse mouse, Vector2 position)
     {
         if (!_isDragging) return;
+
+        // 按下点累积位移超过阈值即视为"拖拽"，从而不触发后续"点击拾取"
+        if ((position - _mouseDownPos).Length() > ClickDragThreshold)
+            _didDrag = true;
+
         Vector2 delta = new Vector2(position.X, position.Y) - _lastMousePos;
         _lastMousePos = new Vector2(position.X, position.Y);
 
@@ -207,5 +246,72 @@ public class Program
             return;
 
         _scene.Camera.Zoom(dy * ZoomScrollSpeed);
+    }
+
+    /// <summary>
+    /// 屏幕像素坐标 → 世界射线 → 拾取并单选高亮。无论命中与否都更新选中状态：
+    /// 命中新对象时先取消上一次选中，再把命中对象置高亮；未命中则清空选中。
+    /// </summary>
+    private static void TryPickAt(Vector2 screenPos)
+    {
+        var ray = _scene.Camera.ScreenToWorldRay(screenPos, new Vector2(_window.Size.X, _window.Size.Y));
+        GameObject? picked = _scene.PickAndHighlight(ray, enable: true);
+
+        // 单选替换：命中对象与上次不同 → 取消上次高亮；未命中 → 清空上次选中
+        if (_selected is { } prev && !ReferenceEquals(prev, picked))
+            prev.Highlighted = false;
+        if (picked is null && _selected is not null)
+            _selected.Highlighted = false;
+        _selected = picked;
+
+        Logger.Info(picked is null ? "Pick: 未命中" : $"Pick: 选中 '{picked.Name}'");
+    }
+
+    /// <summary>
+    /// Builds a small colored point cloud to demonstrate the PointCloud2-style field layout
+    /// (a hue rainbow mapped onto a sphere), with per-point RGB packed into a float.
+    /// </summary>
+    private static PointCloud BuildDemoCloud()
+    {
+        var fields = new[]
+        {
+            new PointField("x", 0, PointFieldDataType.Float32),
+            new PointField("y", 4, PointFieldDataType.Float32),
+            new PointField("z", 8, PointFieldDataType.Float32),
+            new PointField("rgb", 12, PointFieldDataType.Float32),
+        };
+
+        const int n = 2000;
+        var data = new byte[n * 16];
+        float goldenAngle = MathF.PI * (3f - MathF.Sqrt(5f)); // ≈2.39996 rad
+        for (int i = 0; i < n; i++)
+        {
+            // Fibonacci sphere：把 n 个点确定性均匀地撒到单位球面上，而非一条螺旋线。
+            float t = (i + 0.5f) / n;
+            float y = 1f - 2f * t;                       // +1 → -1
+            float r = MathF.Sqrt(MathF.Max(0f, 1f - y * y));
+            float theta = goldenAngle * i;
+            float x = MathF.Cos(theta) * r;
+            float z = MathF.Sin(theta) * r;
+
+            int off = i * 16;
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off), x);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 4), y);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 8), z);
+
+            // 各通道先缩放到 0..255 再截断（避免 (uint) 把 [0,1] 提前截成 0/1 导致绝大多数点为纯黑）
+            uint rgb = ((uint)((MathF.Sin(t * MathF.PI * 2f) * 0.5f + 0.5f) * 255f)) << 16
+                | ((uint)((MathF.Sin(t * MathF.PI * 2f + 2.09f) * 0.5f + 0.5f) * 255f)) << 8
+                | ((uint)((MathF.Sin(t * MathF.PI * 2f + 4.18f) * 0.5f + 0.5f) * 255f));
+
+            // Pack RGB into a float whose bit pattern is 0x00RRGGBB.
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 12),
+                BitConverter.Int32BitsToSingle((int)rgb));
+        }
+
+        var cloudData = new PointCloud2Data(fields, data, 16, width: n, height: 1);
+        var cloud = new PointCloud(2f, null, "demo-pointcloud", cloudData);
+        cloud.Transform.Position = new Vector3(1.2f, 1.2f, 0f);
+        return cloud;
     }
 }

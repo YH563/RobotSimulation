@@ -16,6 +16,8 @@ uniform float uLightIntensities[MAX_LIGHTS];
 
 uniform vec3 uViewPos;
 uniform vec3 uAmbientColor;   // 场景环境光（Renderer 每帧从 Scene.Settings 传入）
+uniform float uHighlightMix;     // 高亮混合系数（0=无；>0 时最终颜色向 uHighlightColor 混合）
+uniform vec3 uHighlightColor;    // 高亮混合的目标色（点选选中反馈）
 uniform vec4 uBaseColor;
 
 uniform sampler2D uAlbedo;
@@ -63,5 +65,10 @@ void main()
     }
 
     // 环境光由场景设置驱动（保证阴面不纯黑；与光源无关）
-    out_color = vec4((uAmbientColor + result) * albedo.rgb, albedo.a);
+    vec3 lit = (uAmbientColor + result) * albedo.rgb;
+
+    // 高亮：把最终颜色整体朝 HighlightColor 混合（对贴图/无贴图都生效，作为选中视觉反馈）
+    lit = mix(lit, uHighlightColor, uHighlightMix);
+
+    out_color = vec4(lit, albedo.a);
 }

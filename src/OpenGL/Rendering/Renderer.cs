@@ -20,13 +20,16 @@ public sealed class Renderer : IRenderer
     /// <summary>单 pass 支持的最大光源数（与 Standard.frag 的 MAX_LIGHTS 一致）。</summary>
     public const int MaxLights = 8;
 
+    /// <summary>高亮 tint 混合系数：高亮节点最终颜色向 HighlightColor 混合的比例（0~1）。</summary>
+    public const float HighlightBlend = 0.30f;
+
     private readonly GL _gl;
     private readonly ShaderProgram _modelShader;
 
     private readonly Dictionary<RenderPassKind, ShaderProgram> _passShaders;
     private readonly Dictionary<MeshData, Mesh> _meshCache = new();
     private readonly Dictionary<LineData, LineMesh> _lineCache = new();
-    private readonly Dictionary<PointCloudData, PointMesh> _pointCache = new();
+    private readonly Dictionary<PointCloud2Data, PointMesh> _pointCache = new();
     private readonly Dictionary<MaterialData, Material> _materialCache = new();
     private bool _disposed;
 
@@ -91,6 +94,12 @@ public sealed class Renderer : IRenderer
     private void ApplyLightUniforms(Vector3[] colors, Vector3[] positions, Vector3[] directions,
         int[] types, float[] intensities, int count)
     {
+        // 必须先绑定模型着色器再写 uniform：glUniform* 作用于「当前绑定程序」。
+        // 若上一帧最后绘制的是点云/线条/坐标轴等其它通道，当前绑定程序不是 Model；
+        // 不加这行会把光源写进错误的程序（模型 uLightCount 保持 0 → 平灰），
+        // 还可能污染点云/线条着色器的 uniform。此处显式绑定即根治跨通道残留。
+        _modelShader.Use();
+
         _modelShader.SetUniform("uLightCount", count);
         _modelShader.SetUniform("uLightColors", colors);
         _modelShader.SetUniform("uLightPositions", positions);
@@ -189,8 +198,17 @@ public sealed class Renderer : IRenderer
         shader.SetUniform("uViewPos", scene.Camera.Position);
         shader.SetUniform("uAmbientColor", scene.AmbientColor);
 
+        // 高亮 tint：无论是否高亮都写 uHighlightMix，避免共享 shader 把上一节点的高亮残留下来
+        // （0 是无高亮；HighlightBlend > 0 时最终颜色向 HighlightColor 混合，贴图/无贴图都生效）
+        Vector4 hl = node.HighlightColor;
+        shader.SetUniform("uHighlightMix", node.Highlighted ? HighlightBlend : 0f);
+        shader.SetUniform("uHighlightColor", new Vector3(hl.X, hl.Y, hl.Z));
+
         mesh.Draw();
     }
+
+
+
 
     /// <summary>Line 通道：无线光线条（网格地面/坐标轴/曲线等）。</summary>
     private void DrawLineNode(GameObject node, Matrix4x4 view, Matrix4x4 projection)
@@ -210,15 +228,20 @@ public sealed class Renderer : IRenderer
     /// <summary>Point 通道：无光照点集（点云）。</summary>
     private void DrawPointNode(GameObject node, Matrix4x4 view, Matrix4x4 projection)
     {
-        PointCloudData data = node.PointData!;
+        PointCloud2Data data = node.PointData!;
         ShaderProgram shader = GetPassShader(RenderPassKind.Point);
         shader.Use();
+
+        // 必须启用 GL_PROGRAM_POINT_SIZE，否则顶点着色器里写的 gl_PointSize 会被忽略，
+        // 点尺寸回落到 glPointSize() 的默认 1px，导致点云显示得过小。
+        _gl.Enable(EnableCap.ProgramPointSize);
 
         shader.SetUniform("uModel", node.Transform.GetModelMatrix());
         shader.SetUniform("uView", view);
         shader.SetUniform("uProjection", projection);
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
-        shader.SetUniform("uPointSize", data.PointSize);
+        shader.SetUniform("uPerVertexColor", data.HasColor ? 1 : 0);
+        shader.SetUniform("uPointSize", node.PointSize);
 
         GetOrCreate(_pointCache, data, () => new PointMesh(_gl, data)).Draw();
     }

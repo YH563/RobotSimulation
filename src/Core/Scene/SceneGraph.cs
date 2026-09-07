@@ -153,7 +153,7 @@ public class SceneGraph : IDisposable
     /// 对场景中所有"可见且可拾取且含网格"的节点做射线拾取，返回最近的命中；无命中返回 null。
     /// 默认只拾取 <see cref="GameObject.Visible"/> 与 <see cref="GameObject.Pickable"/> 均为 true
     /// 且 <see cref="GameObject.MeshData"/> 非空的对象；网格地面、坐标轴等 <see cref="LineData"/>、
-    /// 点云 <see cref="PointCloudData"/> 为无线光，不参与拾取。
+    /// Point cloud <see cref="PointCloud2Data"/> carries no lighting and is skipped during picking.
     /// </summary>
     /// <param name="ray">世界空间射线（建议来自 <see cref="Camera.ScreenToWorldRay"/>）。</param>
     /// <param name="predicate">可选过滤器（如只拾取某类/某个 link）；返回 true 才参与拾取。</param>
@@ -164,6 +164,27 @@ public class SceneGraph : IDisposable
         foreach (var root in _roots)
             PickRecursive(root, ray, predicate, hitInvisible, ref best);
         return best;
+    }
+
+    /// <summary>
+    /// 点选即高亮闭环：对 <paramref name="ray"/> 执行 <see cref="Pick"/>，命中后把该对象的
+    /// <see cref="GameObject.Highlighted"/> 设为 <paramref name="enable"/>（默认 true），并返回命中对象；
+    /// 未命中返回 null。纯转发的辅助方法——只设置高亮数据，不接管宿主输入框架（如鼠标事件轮询）。
+    /// </summary>
+    /// <param name="ray">待检测的射线（世界坐标，建议来自 <see cref="Camera.ScreenToWorldRay"/>）。</param>
+    /// <param name="enable">命中时把 <see cref="GameObject.Highlighted"/> 置为 true/false。</param>
+    /// <param name="predicate">可选过滤：返回 false 的对象不参与命中（如只响应机器人节点）。</param>
+    /// <param name="hitInvisible">为 true 时也会命中不可见对象。</param>
+    /// <returns>命中的对象；未命中或射线不命中任何节点时返回 null。</returns>
+    public GameObject? PickAndHighlight(Ray ray, bool enable = true,
+        Func<GameObject, bool>? predicate = null, bool hitInvisible = false)
+    {
+        RaycastHit? hit = Pick(ray, predicate, hitInvisible);
+        if (hit is not { } found)
+            return null;
+
+        found.Object.Highlighted = enable;
+        return found.Object;
     }
 
     private void PickRecursive(GameObject node, in Ray ray, Func<GameObject, bool>? predicate,

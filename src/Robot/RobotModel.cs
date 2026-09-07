@@ -61,6 +61,8 @@ public sealed class RobotModel : GameObject
         RobotName = description.Name ?? string.Empty;
         BuildTree();
         LockTree(); // 构建完成后锁定整棵子树：子 link 位姿只能经 RobotModel 内置接口修改
+        // 默认不高亮。高亮改为纯点选反馈：由宿主在鼠标命中时经 SceneGraph.PickAndHighlight 设置。
+        // 若需整棵树默认高亮，可手动调用 SetSubtreeHighlight(this)（该方法保留在此供开发者使用）。
     }
 
     /// <summary>校验描述非空且恰有一个根 link，返回根 link 名（将作为本 GameObject 的 Name）。</summary>
@@ -406,5 +408,15 @@ public sealed class RobotModel : GameObject
         transform.SetReadOnly(true);
         foreach (Transform child in transform.Children)
             LockTransform(child);
+    }
+
+    /// <summary>把整棵子树上视觉节点（带 MeshData）的 <see cref="GameObject.Highlighted"/> 置为 true；
+    /// 高亮是纯数据开关，锁定只约束 Transform 位姿，因此开发者可随后逐节点关闭/自定义。</summary>
+    private static void SetSubtreeHighlight(GameObject node)
+    {
+        if (node.MeshData != null)
+            node.Highlighted = true;
+        foreach (Transform child in node.Transform.Children)
+            SetSubtreeHighlight(child.Owner);
     }
 }

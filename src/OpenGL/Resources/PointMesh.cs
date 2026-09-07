@@ -5,21 +5,24 @@ using System;
 namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
-/// GPU 点缓冲（GL_POINTS），对应 Core 的 <see cref="PointCloudData"/>。
-/// 位置在 attribute 0；点大小/颜色由 Point 通道着色器的 uniform 给定。
+/// GPU point buffer (GL_POINTS) backing a Core <see cref="PointCloud2Data"/>.
+/// Position is uploaded to attribute 0; if the cloud carries per-point colors
+/// (<see cref="PointCloud2Data.HasColor"/>) they are uploaded to attribute 1,
+/// otherwise the Point pass shader uses a uniform color. Point size is a uniform.
 /// </summary>
 public sealed class PointMesh : IDisposable
 {
     private readonly GL _gl;
-    private readonly uint _vao, _vbo;
+    private readonly uint _vao, _vbo, _colorVbo;
     private readonly uint _vertexCount;
     private bool _disposed;
 
-    public PointMesh(GL gl, PointCloudData data)
+    public PointMesh(GL gl, PointCloud2Data data)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
         _vertexCount = (uint)data.Count;
         float[] positions = data.ToPositionArray();
+        float[]? colors = data.ToColorArray();
 
         _vao = gl.GenVertexArray();
         gl.BindVertexArray(_vao);
@@ -37,7 +40,26 @@ public sealed class PointMesh : IDisposable
             gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
         }
 
+        _colorVbo = colors is null ? 0 : SetupColors(gl, colors);
+
         gl.BindVertexArray(0);
+    }
+
+    private uint SetupColors(GL gl, float[] colors)
+    {
+        uint buffer = gl.GenBuffer();
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, buffer);
+        unsafe
+        {
+            fixed (float* ptr = colors)
+                gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(colors.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+        }
+        gl.EnableVertexAttribArray(1);
+        unsafe
+        {
+            gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 4 * sizeof(float), (void*)0);
+        }
+        return buffer;
     }
 
     public void Draw()
@@ -52,6 +74,7 @@ public sealed class PointMesh : IDisposable
         if (_disposed) return;
         if (_vao != 0) _gl.DeleteVertexArray(_vao);
         if (_vbo != 0) _gl.DeleteBuffer(_vbo);
+        if (_colorVbo != 0) _gl.DeleteBuffer(_colorVbo);
         _disposed = true;
     }
 }
