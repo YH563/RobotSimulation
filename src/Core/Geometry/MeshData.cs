@@ -82,4 +82,24 @@ public sealed class MeshData
     /// 返回索引缓冲副本。
     /// </summary>
     public uint[] ToIndexArray() => _indices.ToArray();
+
+    /// <summary>
+    /// 计算本网格在“局部坐标”下的轴对齐包围盒，供拾取粗筛等用途。
+    /// 空网格返回一个空盒（Min = Max = 0）。这是 CPU O(n) 计算；
+    /// 高频自定义网格建议由调用方缓存（本类不缓存，保持 MeshData 可复用/可在线程间共享）。
+    /// </summary>
+    public Bounds ComputeBounds()
+    {
+        if (_positions.Count == 0)
+            return new Bounds(Vector3.Zero, Vector3.Zero);
+
+        Vector3 min = _positions[0], max = _positions[0];
+        for (int i = 1; i < _positions.Count; i++)
+        {
+            Vector3 p = _positions[i];
+            min = Vector3.Min(min, p);
+            max = Vector3.Max(max, p);
+        }
+        return new Bounds(min, max);
+    }
 }

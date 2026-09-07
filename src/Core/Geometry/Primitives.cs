@@ -67,29 +67,30 @@ internal static class Primitives
 
         var mesh = new MeshData();
 
-        // (外法线 N, 切线 U)。副法线 V = cross(N, U)，满足 U×V = N，
-        // 因此四角点 (c00,c10,c11,c01) 排列后三角形天然 CCW。
-        Span<(Vector3 Normal, Vector3 Tangent, float SizeU, float SizeV)> faces =
-            stackalloc (Vector3 Normal, Vector3 Tangent, float SizeU, float SizeV)[]
+        // (外法线 N, 面的中心偏移 CenterOffset, 切线 U, 面内两个尺寸 SizeU/SizeV)。
+        // 副法线 V = cross(N, U)，满足 U×V = N，因此四角点 (c00,c10,c11,c01) 排列后三角形天然 CCW。
+        // 关键：每个面的矩形必须沿法线偏移到 ±对应半宽（否则六个面都过原点，退化为"扁十字"）。
+        Span<(Vector3 Normal, Vector3 CenterOffset, Vector3 Tangent, float SizeU, float SizeV)> faces =
+            stackalloc (Vector3 Normal, Vector3 CenterOffset, Vector3 Tangent, float SizeU, float SizeV)[]
             {
-                ( Vector3.UnitX,  Vector3.UnitY, height, depth),   // +X
-                (-Vector3.UnitX,  Vector3.UnitY, height, depth),   // -X
-                ( Vector3.UnitY,  Vector3.UnitX, width,  depth),   // +Y
-                (-Vector3.UnitY,  Vector3.UnitX, width,  depth),   // -Y
-                ( Vector3.UnitZ,  Vector3.UnitX, width,  height),  // +Z
-                (-Vector3.UnitZ,  Vector3.UnitX, width,  height),  // -Z
+                ( Vector3.UnitX,  new Vector3( width * 0.5f, 0f, 0f), Vector3.UnitY, height, depth),   // +X
+                (-Vector3.UnitX,  new Vector3(-width * 0.5f, 0f, 0f), Vector3.UnitY, height, depth),   // -X
+                ( Vector3.UnitY,  new Vector3(0f,  height * 0.5f, 0f), Vector3.UnitX, width,  depth),  // +Y
+                (-Vector3.UnitY,  new Vector3(0f, -height * 0.5f, 0f), Vector3.UnitX, width,  depth),  // -Y
+                ( Vector3.UnitZ,  new Vector3(0f, 0f,  depth * 0.5f), Vector3.UnitX, width,  height),  // +Z
+                (-Vector3.UnitZ,  new Vector3(0f, 0f, -depth * 0.5f), Vector3.UnitX, width,  height),  // -Z
             };
 
-        foreach (var (normal, tangent, sizeU, sizeV) in faces)
+        foreach (var (normal, centerOffset, tangent, sizeU, sizeV) in faces)
         {
             Vector3 bitangent = Vector3.Cross(normal, tangent);
             Vector3 hu = tangent * (sizeU * 0.5f);
             Vector3 hv = bitangent * (sizeV * 0.5f);
 
-            uint i00 = mesh.AddVertex(-hu - hv, normal, new Vector2(0f, 0f), tangent);
-            uint i10 = mesh.AddVertex( hu - hv, normal, new Vector2(1f, 0f), tangent);
-            uint i11 = mesh.AddVertex( hu + hv, normal, new Vector2(1f, 1f), tangent);
-            uint i01 = mesh.AddVertex(-hu + hv, normal, new Vector2(0f, 1f), tangent);
+            uint i00 = mesh.AddVertex(centerOffset - hu - hv, normal, new Vector2(0f, 0f), tangent);
+            uint i10 = mesh.AddVertex(centerOffset + hu - hv, normal, new Vector2(1f, 0f), tangent);
+            uint i11 = mesh.AddVertex(centerOffset + hu + hv, normal, new Vector2(1f, 1f), tangent);
+            uint i01 = mesh.AddVertex(centerOffset - hu + hv, normal, new Vector2(0f, 1f), tangent);
 
             AddOrientedTriangle(mesh, i00, i10, i11, normal);
             AddOrientedTriangle(mesh, i00, i11, i01, normal);

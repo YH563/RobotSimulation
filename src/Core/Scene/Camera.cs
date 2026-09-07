@@ -1,4 +1,5 @@
 using System.Numerics;
+using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Utils;
 
 namespace RobotSimulation.Core.Scene;
@@ -105,6 +106,39 @@ public class Camera : GameObject
             AspectRatio,
             NearPlane,
             FarPlane);
+
+    /// <summary>
+    /// 把屏幕像素坐标反投影成世界空间射线（P0 拾取的入口）。<paramref name="screenPositionPixels"/> 的
+    /// 原点在左上角（X 向右、Y 向下），<paramref name="viewportSizePixels"/> 为视口尺寸（像素）。
+    /// 射线起点为相机位置，方向指向该屏幕点对应的三维视线。可配合 <see cref="SceneGraph.Pick"/> 使用。
+    /// </summary>
+    /// <exception cref="System.ArgumentOutOfRangeException">视口尺寸任一轴非正。</exception>
+    /// <exception cref="System.InvalidOperationException">视图/投影矩阵不可逆。</exception>
+    public Ray ScreenToWorldRay(Vector2 screenPositionPixels, Vector2 viewportSizePixels)
+    {
+        if (viewportSizePixels.X <= 0f || viewportSizePixels.Y <= 0f)
+            throw new System.ArgumentOutOfRangeException(
+                nameof(viewportSizePixels), viewportSizePixels, "视口尺寸必须为正。");
+
+        // 像素（左上原点）→ NDC（[-1,1]，Y 向上）
+        float ndcX = screenPositionPixels.X / viewportSizePixels.X * 2f - 1f;
+        float ndcY = 1f - screenPositionPixels.Y / viewportSizePixels.Y * 2f;
+
+        // 用两个深度的 NDC 点反求世界点，差值即视线方向；逆矩阵取 view*proj 的组合。
+        Matrix4x4 viewProj = GetViewMatrix() * GetProjectionMatrix();
+        bool invertible = Matrix4x4.Invert(viewProj, out Matrix4x4 invViewProj);
+        if (!invertible)
+            throw new System.InvalidOperationException("相机视图/投影矩阵不可逆，无法反投影。");
+
+        Vector3 near = DivideByW(Vector4.Transform(new Vector4(ndcX, ndcY, 0f, 1f), invViewProj));
+        Vector3 far = DivideByW(Vector4.Transform(new Vector4(ndcX, ndcY, 1f, 1f), invViewProj));
+
+        return new Ray(Position, far - near);
+    }
+
+    private static Vector3 DivideByW(Vector4 v)
+        => new(v.X / v.W, v.Y / v.W, v.Z / v.W);
+
 
     /// <summary>旋转视角（偏航/俯仰增量，度）。</summary>
     public void Rotate(float deltaYawDeg, float deltaPitchDeg)

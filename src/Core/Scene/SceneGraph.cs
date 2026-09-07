@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using RobotSimulation.Core.Geometry;
 
 namespace RobotSimulation.Core.Scene;
 
@@ -110,6 +111,7 @@ public class SceneGraph : IDisposable
             return null;
 
         var grid = new Grid(GridCellSize, GridCellCount, GridColor);
+        grid.SetSubtreePickable(false);   // 网格是参考平面，不应参与拾取
         Add(grid);
         return grid;
     }
@@ -133,6 +135,7 @@ public class SceneGraph : IDisposable
             return null;
 
         var axes = new Axes(WorldAxesLength, name: "world-axes") { Transform = { Position = Vector3.Zero } };
+        axes.SetSubtreePickable(false);   // 坐标轴是显示辅助，不应参与拾取
         Add(axes);
         return axes;
     }
@@ -144,6 +147,87 @@ public class SceneGraph : IDisposable
         Camera.Distance = 3.2f;
         Camera.Pitch = 25f;
         Camera.Yaw = -90f;
+    }
+
+    /// <summary>
+    /// 对场景中所有"可见且可拾取且含网格"的节点做射线拾取，返回最近的命中；无命中返回 null。
+    /// 默认只拾取 <see cref="GameObject.Visible"/> 与 <see cref="GameObject.Pickable"/> 均为 true
+    /// 且 <see cref="GameObject.MeshData"/> 非空的对象；网格地面、坐标轴等 <see cref="LineData"/>、
+    /// 点云 <see cref="PointCloudData"/> 为无线光，不参与拾取。
+    /// </summary>
+    /// <param name="ray">世界空间射线（建议来自 <see cref="Camera.ScreenToWorldRay"/>）。</param>
+    /// <param name="predicate">可选过滤器（如只拾取某类/某个 link）；返回 true 才参与拾取。</param>
+    /// <param name="hitInvisible">为 true 时也会命中不可见对象。</param>
+    public RaycastHit? Pick(Ray ray, Func<GameObject, bool>? predicate = null, bool hitInvisible = false)
+    {
+        RaycastHit? best = null;
+        foreach (var root in _roots)
+            PickRecursive(root, ray, predicate, hitInvisible, ref best);
+        return best;
+    }
+
+    private void PickRecursive(GameObject node, in Ray ray, Func<GameObject, bool>? predicate,
+        bool hitInvisible, ref RaycastHit? best)
+    {
+        if (node.Pickable && (hitInvisible || node.Visible)
+            && node.MeshData is { } mesh && mesh.TriangleCount > 0
+            && (predicate?.Invoke(node) ?? true))
+        {
+            TryPickMesh(node, mesh, ray, ref best);
+        }
+
+        foreach (var child in node.Transform.Children)
+            PickRecursive(child.Owner, ray, predicate, hitInvisible, ref best);
+    }
+
+    private void TryPickMesh(GameObject node, MeshData mesh, in Ray ray, ref RaycastHit? best)
+    {
+        Matrix4x4 model = node.Transform.GetModelMatrix();
+        if (!Matrix4x4.Invert(model, out Matrix4x4 invModel))
+            return;   // 模型矩阵不可逆（如 scale=0），直接忽略
+
+        // 把射线变换到节点局部空间：先对局部 AABB 粗筛，再逐三角形精确命中。
+        Vector3 localOrigin = Vector3.Transform(ray.Origin, invModel);
+        Vector3 localDir = Vector3.Normalize(Vector3.TransformNormal(ray.Direction, invModel));
+        var localRay = new Ray(localOrigin, localDir);
+
+        if (Raycast.HitAABB(localRay, mesh.ComputeBounds()) is null)
+            return;
+
+        IReadOnlyList<Vector3> pos = mesh.Positions;
+        IReadOnlyList<uint> idx = mesh.Indices;
+
+        float bestLocalDist = float.MaxValue;
+        Vector3 bestLocalPoint = default, bestLocalNormal = default;
+        float bestU = 0f, bestV = 0f;
+
+        for (int i = 0; i < idx.Count; i += 3)
+        {
+            Vector3 a = pos[(int)idx[i]];
+            Vector3 b = pos[(int)idx[i + 1]];
+            Vector3 c = pos[(int)idx[i + 2]];
+
+            if (Raycast.HitTriangle(localRay, a, b, c, out float t, out Vector3 n, out float u, out float v)
+                && t < bestLocalDist)
+            {
+                bestLocalDist = t;
+                bestLocalPoint = localOrigin + localDir * t;
+                bestLocalNormal = n;
+                bestU = u;
+                bestV = v;
+            }
+        }
+
+        if (bestLocalDist >= float.MaxValue)
+            return;
+
+        // 局部命中点/法线变换回世界；世界距离按世界命中点与射线起点差计算（非均匀缩放下局部 t≠世界距离）。
+        Vector3 worldPoint = Vector3.Transform(bestLocalPoint, model);
+        Vector3 worldNormal = Vector3.Normalize(Vector3.TransformNormal(bestLocalNormal, model));
+        float distance = (worldPoint - ray.Origin).Length();
+
+        if (best is null || distance < best.Value.Distance)
+            best = new RaycastHit(node, worldPoint, distance, worldNormal, bestU, bestV);
     }
 
     /// <summary>

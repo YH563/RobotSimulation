@@ -60,6 +60,7 @@ public sealed class RobotModel : GameObject
         _resolver = resolver;
         RobotName = description.Name ?? string.Empty;
         BuildTree();
+        LockTree(); // 构建完成后锁定整棵子树：子 link 位姿只能经 RobotModel 内置接口修改
     }
 
     /// <summary>校验描述非空且恰有一个根 link，返回根 link 名（将作为本 GameObject 的 Name）。</summary>
@@ -135,6 +136,23 @@ public sealed class RobotModel : GameObject
     /// <summary>创建 headless 纯状态对象（不依赖场景/渲染）：关节值 + FK。</summary>
     public RobotState CreateState() => new RobotState(_description);
 
+    /// <summary>
+    /// 机器人整体（根 link）在其父坐标系下的位姿。
+    /// 读、写都走本类型内置接口：写操作经 <see cref="Transform.SetLocalPose"/> 绕过只读保护，
+    /// 与 <c>SetJointValue</c> 一样是唯一允许改动整棵树位姿的入口（根 link 无 incoming 关节，可自由摆放整机）。
+    /// </summary>
+    public Matrix4x4 RootPose
+    {
+        get => Transform.GetLocalMatrix();
+        set
+        {
+            if (Matrix4x4.Decompose(value, out Vector3 scale, out Quaternion rotation, out Vector3 position))
+                Transform.SetLocalPose(position, rotation, scale);
+            else
+                Transform.SetLocalPose(value.Translation, Quaternion.Identity, Vector3.One);
+        }
+    }
+
     // ------------------------------------------------------------------
     // 树构建
     // ------------------------------------------------------------------
@@ -188,6 +206,7 @@ public sealed class RobotModel : GameObject
             _drivableJoints.Add(joint);
             _drivableChildLinks.Add(linkNodes[joint.ChildLinkName]);
         }
+
         _jointValues = new float[_drivableJoints.Count];
     }
 
@@ -285,13 +304,14 @@ public sealed class RobotModel : GameObject
     }
 
     /// <summary>URDF mesh 几何 → 文件导入 → 子节点（每个 submesh 一个，URDF 材质覆盖文件材质）。</summary>
-    private IReadOnlyList<GameObject> LoadMeshVisual(string linkName, int index, VisualElement visual, MeshGeometry mesh)
+    private IReadOnlyList<GameObject> LoadMeshVisual(string linkName, int index, VisualElement visual,
+        MeshGeometry mesh)
     {
         IAssetResolver resolver = _resolver ?? new FileSystemAssetResolver();
         string path = resolver.Resolve(mesh.Uri, _description.SourceBaseDirectory)
-            ?? throw new FileNotFoundException(
-                $"无法解析 mesh 资源 '{mesh.Uri}'（link '{linkName}' 的 visual#{index}）。请检查 URDF 路径。",
-                mesh.Uri);
+                      ?? throw new FileNotFoundException(
+                          $"无法解析 mesh 资源 '{mesh.Uri}'（link '{linkName}' 的 visual#{index}）。请检查 URDF 路径。",
+                          mesh.Uri);
 
         LoadedModel model;
         try
@@ -317,6 +337,7 @@ public sealed class RobotModel : GameObject
             ApplyPose(node.Transform, visual.LocalTransform);
             nodes.Add(node);
         }
+
         Logger.Debug($"[RobotModel] '{baseName}' ← {path}（{model.Meshes.Count} 个 submesh）");
         return nodes;
     }
@@ -333,6 +354,7 @@ public sealed class RobotModel : GameObject
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } texturePath)
                 fileMaterial.AlbedoTexture = TextureReference.FromFile(texturePath);
         }
+
         return fileMaterial;
     }
 
@@ -363,21 +385,26 @@ public sealed class RobotModel : GameObject
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } path)
                 data.AlbedoTexture = TextureReference.FromFile(path);
         }
+
         return data;
     }
 
-    /// <summary>把行主序位姿矩阵（仅旋转 + 平移）分解到 Transform 的 Position/Rotation。</summary>
+    /// <summary>把行主序位姿矩阵（仅旋转 + 平移）分解到 Transform 的 Position/Rotation（保留现有 Scale）。</summary>
     private static void ApplyPose(Transform transform, Matrix4x4 pose)
     {
         if (Matrix4x4.Decompose(pose, out _, out Quaternion rotation, out Vector3 position))
-        {
-            transform.Position = position;
-            transform.Rotation = rotation;
-        }
+            transform.SetLocalPose(position, rotation, transform.Scale);
         else
-        {
-            transform.Position = pose.Translation;
-            transform.Rotation = Quaternion.Identity;
-        }
+            transform.SetLocalPose(pose.Translation, Quaternion.Identity, transform.Scale);
+    }
+
+    /// <summary>锁定整棵子树（含根）：之后任何直接写子 link Transform 的尝试都会抛异常。</summary>
+    private void LockTree() => LockTransform(Transform);
+
+    private static void LockTransform(Transform transform)
+    {
+        transform.SetReadOnly(true);
+        foreach (Transform child in transform.Children)
+            LockTransform(child);
     }
 }

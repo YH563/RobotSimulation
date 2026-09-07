@@ -47,6 +47,7 @@ public class GameObject
             if (value)
             {
                 _localAxes ??= new Axes(LocalAxesLength, name: "local-axes");
+                _localAxes.SetSubtreePickable(false);   // 局部坐标轴是显示辅助，不应参与拾取
                 _localAxes.Transform.Parent = Transform;
             }
             else
@@ -70,6 +71,23 @@ public class GameObject
     public MaterialData? MaterialData { get; set; }
 
     public bool Visible { get; set; } = true;
+
+    /// <summary>
+    /// 是否参与射线拾取（<see cref="SceneGraph.Pick"/>）。默认 true。
+    /// 默认装配在场景里的显示辅助（世界/局部坐标轴、网格地面等）会设为 false，
+    /// 避免他们挡住/抢先目标对象的拾取；用户也可对任意子树整体屏蔽。
+    /// </summary>
+    public bool Pickable { get; set; } = true;
+
+    /// <summary>
+    /// 递归设置本节点及所有后代的 <see cref="Pickable"/>（用于一次性屏蔽某根子树，如坐标轴）。
+    /// </summary>
+    public void SetSubtreePickable(bool value)
+    {
+        Pickable = value;
+        foreach (var child in Transform.Children)
+            child.Owner.SetSubtreePickable(value);
+    }
 
     public GameObject(MeshData? meshData = null, MaterialData? materialData = null, string? name = "")
     {

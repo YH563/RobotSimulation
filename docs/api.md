@@ -54,8 +54,16 @@
 ### 3.1 `Core/Scene`（引擎能力，public）
 
 场景对象模型：`GameObject`（含 `Name`，支持无 Mesh 的骨架节点）、`Transform`（父子层级，
-行主序/行向量）、`SceneGraph`（Add/Remove/Update）、`Light`、`Camera`（轨道相机：只暴露数学
-状态与 `Rotate/Pan/Zoom/Reset` 命令，不暴露输入框架类型）。
+行主序/行向量，含 `LocalToWorld`/`WorldToLocal`/`GetWorldInverseMatrix`）、`SceneGraph`
+（Add/Remove/Update/Pick）、`Light`、`Camera`（轨道相机：只暴露数学状态与
+`Rotate/Pan/Zoom/Reset` 命令，不暴露输入框架类型；另有 `ScreenToWorldRay` 做像素反投影）。
+
+**拾取（P0 · 图形内核面能力，不是应用层点选）**：`Camera.ScreenToWorldRay` 把宿主给的屏幕像素
+转成世界射线；`SceneGraph.Pick` 返回最近命中的 `RaycastHit`（命中对象 / 世界点 / 距离 / 法线 /
+重心坐标）。`GameObject.Pickable`（默认 true）可整体屏蔽某根子树（默认装配的世界/局部坐标轴、
+网格地面已设为 false，避免遮挡目标的拾取）；`Pick` 的可选 `predicate` 用于按类型/link 名过滤。
+本库只提供"射线 → 命中"的底层数学，**不**接管鼠标/输入框架（见 §1.7）：由宿主把自身输入事件
+翻译为 `Ray` 后调用。
 
 基础图元是 `GameObject` 派生类——`new` 即生成 CPU 几何，轴沿 +Z，参数为 URDF 语义尺寸：
 
@@ -71,8 +79,11 @@
 
 | 类型 | 说明 |
 |---|---|
-| `MeshData` | CPU 网格数据；`AddVertex/AddTriangle/ToInterleavedArray/ToIndexArray` |
+| `MeshData` | CPU 网格数据；`AddVertex/AddTriangle/ToInterleavedArray/ToIndexArray/ComputeBounds` |
 | `VertexLayout` | 交错顶点布局单一事实来源（pos3 \| uv2 \| normal3 \| tangent3） |
+| `Ray` | 世界空间射线（起点 + 已归一化方向；`Direction` 单位长，射线参数 `t` 即世界距离） |
+| `Bounds` | 轴对齐包围盒（`Min/Max/Center/Size`；`FromPoints`） |
+| `Raycast` | 纯几何射线求交原语：`HitSphere` / `HitAABB` / `HitTriangle`（Möller–Trumbore，双面命中）/ `HitPlane` |
 | `AssimpModelLoader`（`Geometry.Import`） | 模型文件 → `LoadedModel`（STL/OBJ/DAE/glTF，封装 AssimpNet）；`Load` / `LoadMeshData` |
 | `LoadedModel` / `LoadedMesh` | 导入结果：平铺 submesh 列表（每个 = MeshData + MaterialData） |
 | `LoadOptions` | 导入选项（FlipUvV / FlipWinding / GlobalScale） |
