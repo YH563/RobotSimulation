@@ -4,9 +4,10 @@ using System.Numerics;
 namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// CPU 侧网格数据：顶点属性按 位置/法线/UV/切线 并行存储，外加索引缓冲。
-/// 与 GPU/OpenGL 完全解耦；需要渲染时通过 <see cref="ToInterleavedArray"/>
-/// 转换为渲染后端（RobotSimulation.OpenGL.Mesh）所需的交错 float[]（pos3|uv2|normal3|tangent3）。
+/// CPU-side mesh data: vertex attributes stored in parallel position/normal/UV/tangent arrays,
+/// plus an index buffer. Fully decoupled from GPU/OpenGL; when rendering is needed, convert via
+/// <see cref="ToInterleavedArray"/> into the interleaved float[] (pos3|uv2|normal3|tangent3)
+/// that the rendering backend (RobotSimulation.OpenGL.Mesh) expects.
 /// </summary>
 public sealed class MeshData
 {
@@ -18,7 +19,7 @@ public sealed class MeshData
 
     public int VertexCount => _positions.Count;
 
-    /// <summary>三角形数量（索引数 / 3）。</summary>
+    /// <summary>Number of triangles (index count / 3).</summary>
     public int TriangleCount => _indices.Count / 3;
 
     public IReadOnlyList<Vector3> Positions => _positions;
@@ -27,9 +28,7 @@ public sealed class MeshData
     public IReadOnlyList<Vector3> Tangents => _tangents;
     public IReadOnlyList<uint> Indices => _indices;
 
-    /// <summary>
-    /// 添加一个顶点并返回其索引。
-    /// </summary>
+    /// <summary>Adds a vertex and returns its index.</summary>
     public uint AddVertex(Vector3 position, Vector3 normal, Vector2 uv, Vector3 tangent)
     {
         uint index = (uint)_positions.Count;
@@ -40,9 +39,7 @@ public sealed class MeshData
         return index;
     }
 
-    /// <summary>
-    /// 添加一个三角形（调用方需保证绕序为从外侧看 CCW）。
-    /// </summary>
+    /// <summary>Adds a triangle (the caller guarantees CCW winding viewed from outside).</summary>
     public void AddTriangle(uint a, uint b, uint c)
     {
         _indices.Add(a);
@@ -51,8 +48,8 @@ public sealed class MeshData
     }
 
     /// <summary>
-    /// 导出为渲染后端所需的交错顶点数组。
-    /// 布局由 <see cref="VertexLayout"/> 定义（pos3 | uv2 | normal3 | tangent3）。
+    /// Exports the interleaved vertex array expected by the rendering backend.
+    /// The layout is defined by <see cref="VertexLayout"/> (pos3 | uv2 | normal3 | tangent3).
     /// </summary>
     public float[] ToInterleavedArray()
     {
@@ -78,15 +75,14 @@ public sealed class MeshData
         return result;
     }
 
-    /// <summary>
-    /// 返回索引缓冲副本。
-    /// </summary>
+    /// <summary>Returns a copy of the index buffer.</summary>
     public uint[] ToIndexArray() => _indices.ToArray();
 
     /// <summary>
-    /// 计算本网格在“局部坐标”下的轴对齐包围盒，供拾取粗筛等用途。
-    /// 空网格返回一个空盒（Min = Max = 0）。这是 CPU O(n) 计算；
-    /// 高频自定义网格建议由调用方缓存（本类不缓存，保持 MeshData 可复用/可在线程间共享）。
+    /// Computes the local-space axis-aligned bounding box, for use with picking broad-phase.
+    /// An empty mesh returns an empty box (Min = Max = 0). This is a CPU O(n) computation;
+    /// for frequently used custom meshes the caller should cache the result (this class does not
+    /// cache, keeping MeshData reusable and shareable across threads).
     /// </summary>
     public Bounds ComputeBounds()
     {

@@ -6,31 +6,34 @@ using RobotSimulation.Robot.Description;
 namespace RobotSimulation.Robot.State;
 
 /// <summary>
-/// 机器人运行时状态：在 <see cref="RobotDescription"/> 之上维护"可驱动关节值"并计算正向运动学（FK）。
+/// Robot runtime state: maintains "drivable joint values" on top of a <see cref="RobotDescription"/> and
+/// computes forward kinematics (FK).
 ///
-/// 设计约束：
-///  - 纯计算：不依赖渲染/GL/UI，可 headless 使用（轨迹、物理、可视化可共用同一状态源）；
-///  - 可驱动关节 = Revolute / Continuous / Prismatic（按 RobotDescription.Joints 顺序）；
-///    Fixed 关节只参与链路、不占驱动位；
-///  - 关节值单位：旋转类用弧度、平移类用米（沿 Axis 方向）；
-///  - 位姿为行主序矩阵（与 Core.Scene.Transform 约定一致）；
-///    <see cref="GetLinkGlobalPose"/> 的结果可直接写入 GameObject.Transform 或供其它系统消费；
-///  - 非线程安全：假定单线程使用；需要跨线程推送时由上层（Sink）做快照。
+/// Design constraints:
+///  - Pure computation: no rendering/GL/UI dependency, usable headless (trajectory, physics, and
+///    visualization can share the same state source);
+///  - Drivable joints = Revolute / Continuous / Prismatic (in RobotDescription.Joints order);
+///    Fixed joints only participate in the chain and do not occupy a drive slot;
+///  - Joint value units: radians for revolute, meters for prismatic (along the Axis direction);
+///  - Poses are row-major matrices (consistent with Core.Scene.Transform);
+///    <see cref="GetLinkGlobalPose"/> results can be written directly to a GameObject.Transform or
+///    consumed by other systems;
+///  - Not thread-safe: assume single-threaded use; the upper layer (a Sink) snapshots it for cross-thread pushes.
 /// </summary>
 public sealed class RobotState
 {
     private readonly RobotDescription _description;
 
-    // 可驱动关节（按描述中 Joints 的顺序）+ 值缓冲
+    // Drivable joints (in description order) + value buffer.
     private readonly List<Joint> _drivableJoints = new();
     private readonly Dictionary<string, int> _drivableIndexByName = new(StringComparer.Ordinal);
     private readonly float[] _jointValues;
 
-    // 拓扑（父先于子）
+    // Topology (parents before children).
     private readonly List<string> _topoLinks = new();
     private readonly Dictionary<string, int> _topoIndexOf = new(StringComparer.Ordinal);
 
-    // link → 连接它的父关节（用于 FK 沿链向上取 parent pose）
+    // link → the parent joint that connects it (used by FK to walk up the chain for the parent pose).
     private readonly Dictionary<string, Joint> _incomingJoint = new(StringComparer.Ordinal);
 
     private Matrix4x4[] _poses = Array.Empty<Matrix4x4>();
@@ -41,7 +44,7 @@ public sealed class RobotState
     {
         _description = description ?? throw new ArgumentNullException(nameof(description));
 
-        // 1) 收集可驱动关节（按描述顺序）
+        // 1) Collect the drivable joints (in description order).
         foreach (Joint joint in description.Joints)
         {
             if (joint.Type is JointType.Revolute or JointType.Continuous or JointType.Prismatic)
@@ -53,16 +56,17 @@ public sealed class RobotState
 
         _jointValues = new float[_drivableJoints.Count];
 
-        // 2) 每个 link 至多一个父关节（树约束）；成环/断链由拓扑排序阶段暴露
+        // 2) Each link has at most one parent joint (tree constraint); cycles/broken chains surface in the
+        //    topological sort phase.
         foreach (Joint joint in description.Joints)
         {
             if (!_incomingJoint.TryAdd(joint.ChildLinkName, joint))
                 throw new ArgumentException(
-                    $"link '{joint.ChildLinkName}' 被多个关节作为 child link——RobotDescription 必须是树。",
+                    $"link '{joint.ChildLinkName}' is the child of multiple joints — RobotDescription must be a tree.",
                     nameof(description));
         }
 
-        // 3) 拓扑排序：从根开始 DFS，保证父先于子
+        // 3) Topological sort: DFS from the roots, guaranteeing parents precede children.
         var children = new Dictionary<string, List<Joint>>(StringComparer.Ordinal);
         foreach (Joint joint in description.Joints)
         {
@@ -81,7 +85,7 @@ public sealed class RobotState
 
         if (_topoLinks.Count != description.Links.Count)
             throw new ArgumentException(
-                "RobotDescription 中存在不可达的 link（成环或断链），无法建立运动学链。",
+                "RobotDescription contains unreachable links (cycle or broken chain); cannot build a kinematic chain.",
                 nameof(description));
 
         for (int i = 0; i < _topoLinks.Count; i++)
@@ -93,7 +97,7 @@ public sealed class RobotState
     private void Visit(Dictionary<string, List<Joint>> children, string linkName, HashSet<string> visited)
     {
         if (!visited.Add(linkName))
-            throw new ArgumentException($"关节链成环：link '{linkName}' 被重复访问。", nameof(_description));
+            throw new ArgumentException($"Joint chain has a cycle: link '{linkName}' was revisited.", nameof(_description));
 
         _topoLinks.Add(linkName);
         if (children.TryGetValue(linkName, out List<Joint>? childJoints))
@@ -104,20 +108,20 @@ public sealed class RobotState
     }
 
     // ------------------------------------------------------------------
-    // 对外接口
+    // Public interface
     // ------------------------------------------------------------------
 
-    /// <summary>构造时使用的静态描述。</summary>
+    /// <summary>The static description used at construction.</summary>
     public RobotDescription Description => _description;
 
-    /// <summary>可被驱动的关节列表（Revolute/Continuous/Prismatic，按描述顺序）。</summary>
+    /// <summary>The list of drivable joints (Revolute/Continuous/Prismatic, in description order).</summary>
     public IReadOnlyList<Joint> DrivableJoints => _drivableJoints;
 
-    /// <summary>可驱动关节数量（即 <see cref="ApplyJointValues"/> 所需数组长度）。</summary>
+    /// <summary>Number of drivable joints (i.e. the array length required by <see cref="ApplyJointValues"/>).</summary>
     public int DrivableJointCount => _drivableJoints.Count;
 
     /// <summary>
-    /// 机器人根部在世界中的位姿（默认 Identity）。所有 FK 结果以此为基准。
+    /// The robot root's pose in world (Identity by default). All FK results are based on this.
     /// </summary>
     public Matrix4x4 RootPose
     {
@@ -130,7 +134,7 @@ public sealed class RobotState
     }
 
     /// <summary>
-    /// 按名称设置关节值（Revolute/Continuous 为弧度，Prismatic 为沿轴的米）。
+    /// Sets a joint value by name (Revolute/Continuous in radians, Prismatic in meters along the axis).
     /// </summary>
     public void SetJointValue(string name, float value)
     {
@@ -138,23 +142,23 @@ public sealed class RobotState
         _dirty = true;
     }
 
-    /// <summary>读取某可驱动关节当前值。</summary>
+    /// <summary>Reads the current value of a drivable joint.</summary>
     public float GetJointValue(string name)
     {
         return _jointValues[ResolveDrivable(name)];
     }
 
     /// <summary>
-    /// 按可驱动关节顺序批量设置关节值。
+    /// Sets joint values in bulk, in drivable-joint order.
     /// </summary>
-    /// <exception cref="ArgumentException">长度不等于 <see cref="DrivableJointCount"/> 时抛出。</exception>
+    /// <exception cref="ArgumentException">Thrown when the length does not equal <see cref="DrivableJointCount"/>.</exception>
     public void ApplyJointValues(IReadOnlyList<float> values)
     {
         if (values is null)
             throw new ArgumentNullException(nameof(values));
         if (values.Count != _drivableJoints.Count)
             throw new ArgumentException(
-                $"关节值数量({values.Count})与可驱动关节数({_drivableJoints.Count})不一致。",
+                $"Joint value count ({values.Count}) does not match the drivable joint count ({_drivableJoints.Count}).",
                 nameof(values));
 
         for (int i = 0; i < values.Count; i++)
@@ -162,15 +166,15 @@ public sealed class RobotState
         _dirty = true;
     }
 
-    /// <summary>计算某 link 相对 <see cref="RootPose"/> 的全局位姿（先更新 FK，再查询）。</summary>
-    /// <exception cref="KeyNotFoundException">link 名称不存在时抛出。</exception>
+    /// <summary>Computes a link's global pose relative to <see cref="RootPose"/> (updates FK first, then queries).</summary>
+    /// <exception cref="KeyNotFoundException">Thrown when the link name does not exist.</exception>
     public Matrix4x4 GetLinkGlobalPose(string linkName)
     {
         RecomputeIfDirty();
         return _poses[_topoIndexOf[linkName]];
     }
 
-    /// <summary>Try 版 <see cref="GetLinkGlobalPose"/>。</summary>
+    /// <summary>Try version of <see cref="GetLinkGlobalPose"/>.</summary>
     public bool TryGetLinkGlobalPose(string linkName, out Matrix4x4 pose)
     {
         RecomputeIfDirty();
@@ -185,14 +189,14 @@ public sealed class RobotState
     }
 
     // ------------------------------------------------------------------
-    // 内部
+    // Internal
     // ------------------------------------------------------------------
 
     private int ResolveDrivable(string name)
     {
         if (!_drivableIndexByName.TryGetValue(name, out int index))
             throw new KeyNotFoundException(
-                $"关节 '{name}' 不存在或不可驱动（Fixed 关节不占驱动位）。");
+                $"Joint '{name}' does not exist or is not drivable (Fixed joints do not occupy a drive slot).");
         return index;
     }
 
@@ -206,7 +210,7 @@ public sealed class RobotState
             string linkName = _topoLinks[i];
             if (!_incomingJoint.TryGetValue(linkName, out Joint? joint))
             {
-                // 根：位姿即 RootPose
+                // Root: its pose is RootPose.
                 _poses[i] = _rootPose;
                 continue;
             }
@@ -222,7 +226,7 @@ public sealed class RobotState
     {
         return _drivableIndexByName.TryGetValue(joint.Name, out int index)
             ? _jointValues[index]
-            : 0f; // Fixed 等非驱动关节
+            : 0f; // Non-drivable joints (e.g. Fixed).
     }
 
     private static Matrix4x4 JointMotion(Joint joint, float q)
@@ -231,16 +235,16 @@ public sealed class RobotState
         {
             case JointType.Revolute:
             case JointType.Continuous:
-                // 绕 Axis 旋转（弧度）
+                // Rotate about the Axis (radians).
                 return Matrix4x4.CreateFromQuaternion(
                     Quaternion.CreateFromAxisAngle(joint.Axis, q));
 
             case JointType.Prismatic:
-                // 沿 Axis 平移（米）
+                // Translate along the Axis (meters).
                 return Matrix4x4.CreateTranslation(joint.Axis * q);
 
             default:
-                return Matrix4x4.Identity; // Fixed
+                return Matrix4x4.Identity; // Fixed.
         }
     }
 }

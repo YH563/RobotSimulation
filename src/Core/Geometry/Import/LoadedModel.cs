@@ -5,18 +5,18 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Geometry.Import;
 
 /// <summary>
-/// 模型文件中一个可独立绘制的 submesh：一组几何（MeshData）+ 它绑定的材质（MaterialData）。
-/// 全部为纯 CPU 数据，可直接挂到 GameObject 上供渲染器实例化。
+/// An independently drawable submesh from a model file: a geometry batch (MeshData) plus its bound
+/// material (MaterialData). All pure CPU data, attachable to a GameObject for renderer instantiation.
 /// </summary>
 public sealed class LoadedMesh
 {
-    /// <summary>Assimp 场景中的 mesh 名；文件未命名时为 null。</summary>
+    /// <summary>Mesh name from the Assimp scene; null when the file does not name it.</summary>
     public string? Name { get; }
 
-    /// <summary>几何数据（局部坐标，未做 URDF/Transform 级缩放）。</summary>
+    /// <summary>Geometry data (local coordinates, with no URDF/Transform-level scaling).</summary>
     public MeshData MeshData { get; }
 
-    /// <summary>该 submesh 使用的材质（文件自带或默认外观）。</summary>
+    /// <summary>Material used by this submesh (from the file, or a default appearance).</summary>
     public MaterialData MaterialData { get; }
 
     public LoadedMesh(string? name, MeshData meshData, MaterialData materialData)
@@ -28,14 +28,15 @@ public sealed class LoadedMesh
 }
 
 /// <summary>
-/// 一次模型文件导入的完整结果：全部 submesh 平铺为列表，由调用方决定如何挂到 GameObject。
+/// The full result of one model-file import: all submeshes flattened into a list, for the caller to
+/// decide how to attach them to GameObjects.
 /// </summary>
 public sealed class LoadedModel
 {
-    /// <summary>已解析的模型文件绝对路径。</summary>
+    /// <summary>Absolute path of the parsed model file.</summary>
     public string FilePath { get; }
 
-    /// <summary>全部可绘制 submesh（空模型在导入时即报错，不会出现空列表）。</summary>
+    /// <summary>All drawable submeshes (an empty model fails at import, so this is never empty).</summary>
     public IReadOnlyList<LoadedMesh> Meshes { get; }
 
     public LoadedModel(string filePath, IReadOnlyList<LoadedMesh> meshes)

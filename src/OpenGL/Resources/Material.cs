@@ -5,7 +5,7 @@ using System.Collections.Generic;
 
 namespace RobotSimulation.OpenGL.Resources;
 
-/// <summary>纹理类型。</summary>
+/// <summary>Texture type.</summary>
 public enum TextureType
 {
     Albedo,
@@ -15,11 +15,12 @@ public enum TextureType
 }
 
 /// <summary>
-/// GPU 侧材质：持有着色器与已上传纹理，绘制前把 CPU 侧外观参数
-/// （<see cref="MaterialData"/>）写入 uniform。
+/// GPU-side material: owns the shader and uploaded textures, and before drawing writes the CPU-side
+/// appearance parameters (<see cref="MaterialData"/>) into uniforms.
 ///
-/// 注意：本类不复制 <see cref="MaterialData"/> 的外观字段——那会形成两套
-/// 相同数据并迫使调用方每帧手动同步。外观参数一律以 <see cref="Apply"/> 的参数为准。
+/// Note: this class does not copy the appearance fields of <see cref="MaterialData"/> — that would create
+/// two sets of the same data and force the caller to manually sync each frame. Appearance parameters are
+/// always taken from the arguments to <see cref="Apply"/>.
 /// </summary>
 public class Material : IDisposable
 {
@@ -33,7 +34,7 @@ public class Material : IDisposable
         Shader = shader;
     }
 
-    /// <summary>设置纹理；传 null 表示移除对应类型纹理。</summary>
+    /// <summary>Sets a texture; passing null removes the texture of that type.</summary>
     public void SetTexture(TextureType type, Texture2D texture)
     {
         if (texture == null)
@@ -43,14 +44,15 @@ public class Material : IDisposable
     }
 
     /// <summary>
-    /// 应用材质：绑定着色器与纹理，并把 <paramref name="appearance"/> 的外观参数写入 uniform。
-    /// 应在每帧、每个使用该材质的对象绘制前调用（外观数据可被任意线程修改，绘制前取最新值）。
+    /// Applies the material: binds the shader and textures, and writes <paramref name="appearance"/>'s
+    /// appearance parameters into uniforms. Call before drawing each object using this material (the
+    /// appearance data can be modified from any thread, so read the latest value before drawing).
     /// </summary>
     public void Apply(MaterialData appearance)
     {
         Shader.Use();
 
-        // 绑定纹理并传递 uniform；未设置的纹理类型标记为缺失（0）
+        // Bind textures and pass the uniform; mark unset texture types as absent (0).
         int unit = 0;
         foreach (var (type, texture) in _textures)
         {
@@ -68,13 +70,13 @@ public class Material : IDisposable
             Shader.SetUniform(HasFlagName(GetUniformName(type)), 0);
         }
 
-        // 外观参数（直接从 CPU 描述读取，无本地副本）
+        // Appearance parameters (read directly from the CPU description, no local copy).
         Shader.SetUniform("uBaseColor", appearance.BaseColor);
         Shader.SetUniform("uMetallicFactor", appearance.MetallicFactor);
         Shader.SetUniform("uRoughnessFactor", appearance.RoughnessFactor);
     }
 
-    /// <summary>uAlbedo → uHasAlbedo（约定 uniform 名以 "u" 开头、后接大写属性名）。</summary>
+    /// <summary>uAlbedo → uHasAlbedo (convention: uniform names start with "u" followed by the capitalized property name).</summary>
     private static string HasFlagName(string uniformName) => "uHas" + uniformName[1..];
 
     private static string GetUniformName(TextureType type) => type switch

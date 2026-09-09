@@ -6,25 +6,26 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 场景节点。只持有场景数据：Transform、模型数据（CPU）与材质描述（CPU），
-/// 不管理任何 GPU 资源——网格/材质的 GPU 实例化由渲染器在渲染时完成。
-/// 因此可以在任意线程创建、跨场景复用，加入 SceneGraph 后即被渲染器遍历绘制。
+/// Scene node. Holds only scene data: Transform, model data (CPU), and material description (CPU).
+/// It manages no GPU resources — the GPU instantiation of meshes/materials is done by the renderer at
+/// render time. So it can be created on any thread, reused across scenes, and after being added to a
+/// SceneGraph it is traversed and drawn by the renderer.
 /// </summary>
 public class GameObject
 {
     /// <summary>
-    /// 对象名称，用于调试与按名查找（例如 URDF link/joint 名）。
+    /// Object name, used for debugging and by-name lookup (e.g. URDF link/joint names).
     /// </summary>
     public string Name { get; set; } = "";
 
     public Transform Transform { get; }
 
-    /// <summary>3D 模型数据（CPU 顶点/索引）。为 null 表示该节点无几何（骨架/纯层级节点）。</summary>
+    /// <summary>3D model data (CPU vertices/indices). null means the node has no geometry (a skeleton/pure hierarchy node).</summary>
     public MeshData? MeshData { get; set; }
 
     /// <summary>
-    /// 线条数据（CPU 线段集，配合 <see cref="MaterialData.PassKind"/> = Line 使用）。
-    /// 用于网格地面、坐标轴等无线光线条；与 <see cref="MeshData"/> 互斥。
+    /// Line data (CPU line set, used with <see cref="MaterialData.PassKind"/> = Line).
+    /// Used for unlit lines such as grid floors and axes; mutually exclusive with <see cref="MeshData"/>.
     /// </summary>
     public LineData? LineData { get; set; }
 
@@ -37,8 +38,9 @@ public class GameObject
     public float PointSize { get; set; } = 3f;
 
     /// <summary>
-    /// 本节点的局部坐标系（子对象方式）：开启时在其 Transform 下挂一个 RGB 小坐标轴，
-    /// 随本对象一起旋转/平移/缩放，渲染走普通递归，无需渲染器特判。
+    /// This node's local coordinate axes (child object): when enabled, a small RGB axes set is attached
+    /// under its Transform and moves/rotates/scales with it, rendered by ordinary recursion with no
+    /// renderer special-casing.
     /// </summary>
     public bool ShowLocalAxes
     {
@@ -51,50 +53,52 @@ public class GameObject
             if (value)
             {
                 _localAxes ??= new Axes(LocalAxesLength, name: "local-axes");
-                _localAxes.SetSubtreePickable(false);   // 局部坐标轴是显示辅助，不应参与拾取
+                _localAxes.SetSubtreePickable(false);   // The local axes are a display aid and should not participate in picking.
                 _localAxes.Transform.Parent = Transform;
             }
             else
             {
                 if (_localAxes is not null)
-                    _localAxes.Transform.Parent = null;   // 从树上摘掉（保留对象以便再挂）
+                    _localAxes.Transform.Parent = null;   // Detach from the tree (keep the object so it can be reattached).
             }
         }
     }
 
-    /// <summary>局部坐标轴的默认长度（挂载时按此创建；此后改它需要重新挂载）。</summary>
+    /// <summary>Default length of the local axes (created at mount time; re-mount to change after).</summary>
     public float LocalAxesLength { get; set; } = 0.3f;
 
-    /// <summary>已挂载的局部坐标轴（<see cref="ShowLocalAxes"/> 开启后非空；可按需再调）。</summary>
+    /// <summary>The mounted local axes (non-null once <see cref="ShowLocalAxes"/> is enabled; can be tuned).</summary>
     public Axes? LocalAxes => _localAxes;
 
     private bool _showLocalAxes;
     private Axes? _localAxes;
 
-    /// <summary>材质描述（CPU）。为 null 表示该节点不绘制（或使用默认外观）。</summary>
+    /// <summary>Material description (CPU). null means the node is not drawn (or uses a default appearance).</summary>
     public MaterialData? MaterialData { get; set; }
 
     public bool Visible { get; set; } = true;
 
     /// <summary>
-    /// 是否高亮（默认 false）。渲染器对高亮节点做一件事：最终颜色向 <see cref="HighlightColor"/>
-    /// 混合（tint），用于点选后的选中视觉反馈。默认关闭；机器人（<c>RobotModel</c>）默认不高亮，
-    /// 由宿主在鼠标命中时经 <see cref="SceneGraph.PickAndHighlight"/> 置为 true。
+    /// Whether highlighted (default false). The renderer does one thing for a highlighted node: blends
+    /// the final color toward <see cref="HighlightColor"/> (tint), for selection visual feedback.
+    /// Default off; the robot (<c>RobotModel</c>) is not highlighted by default, and the host sets it to
+    /// true on a mouse hit via <see cref="SceneGraph.PickAndHighlight"/>.
     /// </summary>
     public bool Highlighted { get; set; }
 
-    /// <summary>高亮颜色（<see cref="Highlighted"/> 为 true 时由渲染后端读取，仅 CPU 数据）。</summary>
+    /// <summary>Highlight color (read by the rendering backend when <see cref="Highlighted"/> is true; CPU data only).</summary>
     public Vector4 HighlightColor { get; set; } = new(1f, 0.72f, 0.16f, 1f);
 
     /// <summary>
-    /// 是否参与射线拾取（<see cref="SceneGraph.Pick"/>）。默认 true。
-    /// 默认装配在场景里的显示辅助（世界/局部坐标轴、网格地面等）会设为 false，
-    /// 避免他们挡住/抢先目标对象的拾取；用户也可对任意子树整体屏蔽。
+    /// Whether to participate in ray picking (<see cref="SceneGraph.Pick"/>). Default true.
+    /// Display aids auto-assembled in the scene (world/local axes, grid floor, etc.) set this to false
+    /// so they do not block the picking of target objects; the user can also disable an entire subtree.
     /// </summary>
     public bool Pickable { get; set; } = true;
 
     /// <summary>
-    /// 递归设置本节点及所有后代的 <see cref="Pickable"/>（用于一次性屏蔽某根子树，如坐标轴）。
+    /// Recursively sets <see cref="Pickable"/> for this node and all descendants (for blanking out a
+    /// subtree, such as axes).
     /// </summary>
     public void SetSubtreePickable(bool value)
     {
@@ -113,19 +117,20 @@ public class GameObject
     }
 
     /// <summary>
-    /// 从外部模型文件（STL/OBJ/DAE/glTF 等，经 <see cref="AssimpModelLoader"/>）加载几何与材质，
-    /// 填充本对象的 <see cref="MeshData"/> / <see cref="MaterialData"/>（纯 CPU 数据，任意线程可调）。
-    /// 仅适用于“文件恰好含一个 mesh”的模型；多 submesh 文件请改用
-    /// <see cref="AssimpModelLoader.Load"/> 获取完整结果后自行分组挂载。
+    /// Loads geometry and material from an external model file (STL/OBJ/DAE/glTF, via
+    /// <see cref="AssimpModelLoader"/>), filling this object's <see cref="MeshData"/> /
+    /// <see cref="MaterialData"/> (pure CPU data, callable from any thread).
+    /// Only for models that "contain exactly one mesh"; for multi-submesh files use
+    /// <see cref="AssimpModelLoader.Load"/> to get the full result and group it yourself.
     /// </summary>
-    /// <param name="filePath">模型文件路径。</param>
-    /// <param name="options">导入选项（翻转、缩放等）；null 使用默认。</param>
+    /// <param name="filePath">Model file path.</param>
+    /// <param name="options">Import options (flip, scale, etc.); null uses defaults.</param>
     public void LoadModel(string filePath, LoadOptions? options = null)
     {
         LoadedModel model = AssimpModelLoader.Load(filePath, options);
         if (model.Meshes.Count != 1)
             throw new InvalidOperationException(
-                $"{model.FilePath} 含 {model.Meshes.Count} 个 submesh：GameObject.LoadModel 仅支持单 mesh 模型，请改用 AssimpModelLoader.Load。");
+                $"{model.FilePath} contains {model.Meshes.Count} submeshes: GameObject.LoadModel only supports single-mesh models, use AssimpModelLoader.Load instead.");
 
         LoadedMesh mesh = model.Meshes[0];
         MeshData = mesh.MeshData;
@@ -133,7 +138,7 @@ public class GameObject
     }
 
     /// <summary>
-    /// 单帧更新逻辑
+    /// Per-frame update logic.
     /// </summary>
     /// <param name="deltaTime"></param>
     public virtual void Update(double deltaTime) { }

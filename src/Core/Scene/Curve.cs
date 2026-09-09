@@ -7,9 +7,9 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 曲线 / 路径（<see cref="GameObject"/>，线条通道）：按给定的连续点串折线连接。
-/// 单色线条（由 <see cref="MaterialData.BaseColor"/> 给定）；数据变化时调用
-/// <see cref="SetPoints"/> 重建即可（渲染器按新的数据引用重新上传一次）。
+/// Curve / path (<see cref="GameObject"/>, Line pass): connects a given sequence of points with
+/// polylines. A single-color line (from <see cref="MaterialData.BaseColor"/>); when the data changes,
+/// call <see cref="SetPoints"/> to rebuild (the renderer re-uploads it once for the new data reference).
 /// </summary>
 public sealed class Curve : GameObject
 {
@@ -25,7 +25,7 @@ public sealed class Curve : GameObject
         SetPoints(points);
     }
 
-    /// <summary>替换曲线点列（至少 2 点成线；不足则清空）。</summary>
+    /// <summary>Replaces the curve's point sequence (at least 2 points form a line; fewer clears it).</summary>
     public void SetPoints(IEnumerable<Vector3> points)
     {
         if (points is null)

@@ -2,25 +2,25 @@
 
 layout (location = 0) in vec3 aPosition;
 
-uniform mat4 uAxesModel;          // 轴的世界"旋转+平移"矩阵（已剔除父级 Scale）
+uniform mat4 uAxesModel;          // World "rotation + translation" matrix of the axis (parent Scale removed).
 uniform mat4 uView;
 uniform mat4 uProjection;
 uniform vec3 uViewPos;
 
-// 坐标轴"恒定屏幕尺寸"控制：
-uniform vec3  uAxesOrigin;        // 轴的原点（节点世界位置）
-uniform float uAxesRefLocalLen;   // 箭头在局部空间沿轴的总长（用于把几何各向同性缩放到目标长度）
-uniform float uAxesRatio;         // 期望轴长 = uAxesRatio × 相机到原点距离，然后按 min/max 夹取
-uniform float uAxesMinLength;     // 世界长度下限
-uniform float uAxesMaxLength;     // 世界长度上限
+// "Constant screen size" control for the axes:
+uniform vec3  uAxesOrigin;        // Axis origin (the node's world position).
+uniform float uAxesRefLocalLen;   // Total arrow length in local space along the axis (to isotropically scale geometry to the target length).
+uniform float uAxesRatio;         // Desired axis length = uAxesRatio × camera-to-origin distance, then clamped by min/max.
+uniform float uAxesMinLength;     // Minimum world length.
+uniform float uAxesMaxLength;     // Maximum world length.
 
 void main()
 {
-    // 先用"无缩放"模型矩阵：off 只含旋转、不含父级缩放
+    // Use the "scaleless" model matrix first: off contains only rotation, no parent scale.
     vec4 worldR = uAxesModel * vec4(aPosition, 1.0);
     vec3 off = worldR.xyz - uAxesOrigin;
 
-    // 各向同性缩放：整支箭头按统一比例拉/压到目标长度，形状保持不变
+    // Isotropic scale: stretch/shrink the whole arrow uniformly to the target length while preserving shape.
     float targetLen = clamp(uAxesRatio * length(uViewPos - uAxesOrigin),
                             uAxesMinLength, uAxesMaxLength);
     float s = targetLen / uAxesRefLocalLen;

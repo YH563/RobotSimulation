@@ -5,34 +5,35 @@ using System.Numerics;
 namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// CPU 侧线段集（每两个顶点 = 一条线段，对应 GL_LINES 语义）。
-/// 可选"逐顶点颜色"（用于坐标系等一物多色的线）；若不使用颜色，
-/// 由挂载对象 <see cref="RobotSimulation.Core.Rendering.MaterialData.BaseColor"/> 统一上色。
+/// CPU-side line set (every two vertices form one segment, matching GL_LINES semantics).
+/// An optional "per-vertex color" (used for multi-colored lines such as axes); when colors are
+/// not used, the owning object's <see cref="RobotSimulation.Core.Rendering.MaterialData.BaseColor"/>
+/// tints the whole set.
 /// </summary>
 public sealed class LineData
 {
     private readonly List<Vector3> _positions = new();
-    private List<Vector4>? _colors;   // 惰性创建；一旦使用逐顶点颜色，后续所有线段都需补色
+    private List<Vector4>? _colors;   // Lazily created; once per-vertex color is used, every later segment must supply a color.
 
-    /// <summary>顶点总数（= 线段数 × 2）。</summary>
+    /// <summary>Total vertex count (= segment count × 2).</summary>
     public int VertexCount => _positions.Count;
 
-    /// <summary>线段数量。</summary>
+    /// <summary>Number of segments.</summary>
     public int SegmentCount => _positions.Count / 2;
 
     public IReadOnlyList<Vector3> Positions => _positions;
 
-    /// <summary>是否启用逐顶点颜色（至少一条线段带颜色后为 true）。</summary>
+    /// <summary>Whether per-vertex coloring is enabled (true once at least one segment carries a color).</summary>
     public bool HasPerVertexColors => _colors != null;
 
-    /// <summary>逐顶点颜色（与 Positions 等长；未带色的线段补不透明白）。</summary>
+    /// <summary>Per-vertex colors (same length as <see cref="Positions"/>; uncolored segments are padded with opaque white).</summary>
     public IReadOnlyList<Vector4>? Colors => _colors;
 
-    /// <summary>追加一条线段（使用材质色）。若已启用逐顶点颜色，则以白色补齐。</summary>
+    /// <summary>Appends a segment using the material color. If per-vertex color is already enabled, pads with white.</summary>
     public void AddSegment(Vector3 a, Vector3 b)
         => AddSegmentInternal(a, b, _colors == null ? null : Vector4.One);
 
-    /// <summary>追加一条逐顶点同色的线段（会启用逐顶点颜色模式）。</summary>
+    /// <summary>Appends a per-vertex colored segment (also enables per-vertex color mode).</summary>
     public void AddSegment(Vector3 a, Vector3 b, Vector4 color)
         => AddSegmentInternal(a, b, color);
 
@@ -56,7 +57,7 @@ public sealed class LineData
         }
     }
 
-    /// <summary>导出连续顶点数组（每段两个顶点），供渲染后端上传 GL_LINES。</summary>
+    /// <summary>Exports a contiguous vertex array (two per segment) for uploading GL_LINES.</summary>
     public float[] ToPositionArray()
     {
         var result = new float[_positions.Count * 3];
@@ -70,7 +71,7 @@ public sealed class LineData
         return result;
     }
 
-    /// <summary>导出逐顶点颜色数组（仅 <see cref="HasPerVertexColors"/> 时有意义）。</summary>
+    /// <summary>Exports the per-vertex color array (only meaningful when <see cref="HasPerVertexColors"/>).</summary>
     public float[]? ToColorArray()
     {
         if (_colors is null)
@@ -88,4 +89,3 @@ public sealed class LineData
         return result;
     }
 }
-

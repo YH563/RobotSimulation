@@ -1,7 +1,7 @@
 #version 330 core
 
 uniform vec4 uColor;
-uniform int uPerVertexColor;   // 1 = 使用逐顶点颜色 v_color
+uniform int uPerVertexColor;   // 1 = use the per-vertex color v_color.
 
 in vec4 v_color;
 

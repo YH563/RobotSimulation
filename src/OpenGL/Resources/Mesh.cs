@@ -5,8 +5,8 @@ using System;
 namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
-/// GPU 网格（VBO/VAO/EBO）。顶点交错布局由 <see cref="VertexLayout"/> 定义，
-/// 与 CPU 侧 MeshData 导出格式保持一致；本类不再自行维护布局数字。
+/// GPU mesh (VBO/VAO/EBO). The interleaved vertex layout is defined by <see cref="VertexLayout"/>,
+/// matching the format exported by CPU-side MeshData; this class does not maintain its own layout numbers.
 /// </summary>
 public class Mesh : IDisposable
 {
@@ -20,7 +20,7 @@ public class Mesh : IDisposable
         _gl = gl;
         _indexCount = indices.Length;
 
-        // 创建 VAO / VBO / EBO
+        // Create VAO / VBO / EBO.
         _vao = gl.GenVertexArray();
         gl.BindVertexArray(_vao);
 
@@ -46,13 +46,13 @@ public class Mesh : IDisposable
             }
         }
 
-        // 设置顶点属性指针（stride 与偏移均取自 VertexLayout，单位字节）
+        // Set up the vertex attribute pointers (stride and offset come from VertexLayout, in bytes).
         SetupAttribute(gl, 0, VertexLayout.PositionComponentCount, VertexLayout.PositionFloatOffset);
         SetupAttribute(gl, 1, VertexLayout.UvComponentCount, VertexLayout.UvFloatOffset);
         SetupAttribute(gl, 2, VertexLayout.NormalComponentCount, VertexLayout.NormalFloatOffset);
         SetupAttribute(gl, 3, VertexLayout.TangentComponentCount, VertexLayout.TangentFloatOffset);
 
-        // 解绑
+        // Unbind.
         _gl.BindVertexArray(0);
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
         _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
@@ -65,7 +65,7 @@ public class Mesh : IDisposable
             VertexLayout.BytesPerVertex, (void*)(floatOffset * sizeof(float)));
     }
 
-    /// <summary>绘制（三角形列表）。</summary>
+    /// <summary>Draws (as a triangle list).</summary>
     public unsafe void Draw()
     {
         _gl.BindVertexArray(_vao);

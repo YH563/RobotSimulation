@@ -15,9 +15,9 @@ uniform int  uLightTypes[MAX_LIGHTS];
 uniform float uLightIntensities[MAX_LIGHTS];
 
 uniform vec3 uViewPos;
-uniform vec3 uAmbientColor;   // 场景环境光（Renderer 每帧从 Scene.Settings 传入）
-uniform float uHighlightMix;     // 高亮混合系数（0=无；>0 时最终颜色向 uHighlightColor 混合）
-uniform vec3 uHighlightColor;    // 高亮混合的目标色（点选选中反馈）
+uniform vec3 uAmbientColor;   // Scene ambient light (passed each frame by the Renderer from Scene.Settings).
+uniform float uHighlightMix;     // Highlight blend factor (0 = none; >0 blends the final color toward uHighlightColor).
+uniform vec3 uHighlightColor;    // Target color of the highlight blend (click-selection feedback).
 uniform vec4 uBaseColor;
 
 uniform sampler2D uAlbedo;
@@ -29,11 +29,11 @@ out vec4 out_color;
 
 void main()
 {
-    // 1. 漫反射颜色
+    // 1. Diffuse color.
     vec4 albedo = uHasAlbedo == 1 ? texture(uAlbedo, v_uv) : uBaseColor;
     if (albedo.a < 0.1) discard;
 
-    // 2. 法线（有法线贴图时经 TBN 转到世界空间）
+    // 2. Normal (transformed via TBN to world space when a normal map is present).
     vec3 normal = normalize(v_normal);
     if (uHasNormal == 1) {
         vec3 tangentNormal = texture(uNormal, v_uv).xyz * 2.0 - 1.0;
@@ -46,7 +46,7 @@ void main()
 
     vec3 viewDir = normalize(uViewPos - v_worldPos);
 
-    // 3. 逐光源（Blinn-Phong）
+    // 3. Per-light (Blinn-Phong).
     vec3 result = vec3(0.0);
     for (int i = 0; i < uLightCount; i++)
     {
@@ -64,10 +64,10 @@ void main()
         result += lightColor * (diff + spec * 0.5);
     }
 
-    // 环境光由场景设置驱动（保证阴面不纯黑；与光源无关）
+    // Ambient light comes from the scene settings (so shadowed faces are not pure black; independent of lights).
     vec3 lit = (uAmbientColor + result) * albedo.rgb;
 
-    // 高亮：把最终颜色整体朝 HighlightColor 混合（对贴图/无贴图都生效，作为选中视觉反馈）
+    // Highlight: blend the final color toward HighlightColor (works with or without textures; selection feedback).
     lit = mix(lit, uHighlightColor, uHighlightMix);
 
     out_color = vec4(lit, albedo.a);

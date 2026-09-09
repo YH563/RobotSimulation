@@ -6,13 +6,13 @@ using Silk.NET.OpenGL;
 namespace RobotSimulation.OpenGL.Device;
 
 /// <summary>
-/// 渲染上下文（设备层）：持有 GL 实例，实现 <see cref="IRenderContext"/> 对外服务。
-/// GL 类型只允许出现在本类型内部——对外（Core/上层）只暴露
-/// <see cref="IRenderContext"/> 纯接口与纯数据参数（Vector4 颜色）。
+/// Rendering context (device layer): owns the GL instance and implements <see cref="IRenderContext"/>.
+/// GL types are allowed only inside this type — externally (Core/upper layers) only the
+/// <see cref="IRenderContext"/> pure interface and pure-data parameters (Vector4 colors) are exposed.
 /// </summary>
 public sealed class GraphicsContext : IRenderContext
 {
-    /// <summary>同程序集（渲染实现层）经此取得 GL；对 Core/上层不暴露。</summary>
+    /// <summary>Used by the same assembly (the rendering implementation layer) to access GL; not exposed to Core/upper layers.</summary>
     internal GL NativeGl => _gl;
 
     /// <inheritdoc />
@@ -22,14 +22,14 @@ public sealed class GraphicsContext : IRenderContext
     private bool _disposed;
 
     /// <summary>
-    /// 设备入口：宿主把渲染线程上创建好的 GL 实例注入，随即被适配为
-    /// <see cref="IRenderContext"/>，之后 GL 不再向外传播。
+    /// Device entry point: the host injects a GL instance created on the render thread, which is adapted
+    /// into an <see cref="IRenderContext"/>; after that GL no longer propagates outward.
     /// </summary>
     public GraphicsContext(GL gl)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
 
-        // 默认开启深度测试和背面剔除，确保不透明几何体正确渲染
+        // Enable depth testing and back-face culling by default to render opaque geometry correctly.
         _gl.Enable(EnableCap.DepthTest);
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Back);
@@ -52,7 +52,7 @@ public sealed class GraphicsContext : IRenderContext
             : ClearBufferMask.ColorBufferBit);
     }
 
-    /// <summary>着色器程序统一由渲染器（Renderer）从内嵌标准目录创建并释放，本类型不再持有。</summary>
+    /// <summary>Shader programs are created and released by the renderer (Renderer) from the embedded standard catalog; this type holds none.</summary>
     public void Dispose()
     {
         if (_disposed) return;

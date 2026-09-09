@@ -5,9 +5,9 @@ using System;
 namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
-/// GPU 线条缓冲（GL_LINES：每两个顶点一条线段），对应 Core 的 <see cref="LineData"/>。
-/// 位置在 attribute 0；若数据带逐顶点颜色则同时上传到 attribute 1，
-/// 否则由 Line 通道着色器使用 uniform uColor 统一上色。
+/// GPU line buffer (GL_LINES: every two vertices one segment), corresponding to Core's <see cref="LineData"/>.
+/// Position is at attribute 0; if the data carries per-vertex colors they are also uploaded to
+/// attribute 1, otherwise the Line pass shader uses the uColor uniform for a uniform color.
 /// </summary>
 public sealed class LineMesh : IDisposable
 {
@@ -77,4 +77,3 @@ public sealed class LineMesh : IDisposable
         _disposed = true;
     }
 }
-

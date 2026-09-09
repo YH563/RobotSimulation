@@ -3,27 +3,28 @@ using System.Numerics;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// <see cref="SceneGraph.Pick"/> 的一次命中结果（不可变）。只含数据，不持有 GPU/渲染资源；
-/// 命中点为世界坐标，距离沿射线（世界单位），法线为世界法线，(U, V) 为命中三角形的重心坐标。
+/// A single hit result from <see cref="SceneGraph.Pick"/> (immutable). Data only, holds no GPU/rendering
+/// resources; the hit point is in world coordinates, the distance is along the ray (world units), the
+/// normal is a world-space normal, and (U, V) are the barycentric coordinates of the hit triangle.
 /// </summary>
 public readonly struct RaycastHit
 {
-    /// <summary>被命中的对象（拥有该 mesh 的节点）。</summary>
+    /// <summary>The object that was hit (the node owning the mesh).</summary>
     public GameObject Object { get; }
 
-    /// <summary>世界坐标命中点。</summary>
+    /// <summary>World-space hit point.</summary>
     public Vector3 Point { get; }
 
-    /// <summary>沿射线方向的距离（世界单位）。</summary>
+    /// <summary>Distance along the ray direction (world units).</summary>
     public float Distance { get; }
 
-    /// <summary>世界坐标命中法线（已归一化，朝向射线的来向）。</summary>
+    /// <summary>World-space hit normal (normalized, facing toward the ray).</summary>
     public Vector3 Normal { get; }
 
-    /// <summary>命中三角形上，顶点 B 的插值权重（重心坐标第 1 个分量）。</summary>
+    /// <summary>Interpolation weight for vertex B of the hit triangle (first barycentric component).</summary>
     public float U { get; }
 
-    /// <summary>命中三角形上，顶点 C 的插值权重（重心坐标第 2 个分量）。</summary>
+    /// <summary>Interpolation weight for vertex C of the hit triangle (second barycentric component).</summary>
     public float V { get; }
 
     public RaycastHit(GameObject @object, Vector3 point, float distance, Vector3 normal, float u, float v)

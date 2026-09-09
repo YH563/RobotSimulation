@@ -2,57 +2,63 @@ using System;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Logging.Console;
 
 namespace RobotSimulation.Core.Utils;
 
 /// <summary>
-/// 进程级静态内部日志器：对 <see cref="Microsoft.Extensions.Logging"/> 的薄门面，各模块无需 DI 即可直接使用。
+/// Process-wide internal static logger: a thin facade over <see cref="Microsoft.Extensions.Logging"/>,
+/// so modules can use it directly without DI.
 /// </summary>
 /// <remarks>
-/// 关键契约：
-/// 1. 首次日志前若未显式 <see cref="Initialize"/>，会自动用「默认彩色控制台」初始化。
-///    宿主自定义 Provider 必须在任何日志输出之前于组合根显式调用（初始化后幂等）。
-/// 2. 显式传入 configure 时，Provider 配置完全由调用方接管（不再自动附加控制台）。
-/// 3. 级别过滤统一由 <see cref="MinimumLevel"/> 总闸控制（默认 Debug，可运行期调整）。
-/// 4. 便捷方法固定用分类 <see cref="DefaultCategory"/>；需要独立分类请用 <see cref="GetLogger{T}"/>。
-/// 5. 进程退出前调用 <see cref="Shutdown"/> 释放 LoggerFactory。
+/// Key contracts:
+/// 1. If <see cref="Initialize"/> is not called before the first log, a default factory is created
+///    automatically with no providers (only the <see cref="OnLog"/> event is available). A host that
+///    wants console/file logging must call <see cref="Initialize"/> with a provider configuration at
+///    the composition root, before any log output (initialization is idempotent afterward).
+/// 2. When a configure delegate is passed, provider configuration is entirely owned by the caller
+///    (no console provider is auto-attached).
+/// 3. Level filtering is controlled by the <see cref="MinimumLevel"/> master switch (default Debug,
+///    adjustable at runtime).
+/// 4. Convenience methods always use the <see cref="DefaultCategory"/> category; use
+///    <see cref="GetLogger{T}"/> for separate categories.
+/// 5. Call <see cref="Shutdown"/> before process exit to dispose the LoggerFactory.
 /// </remarks>
 public static class Logger
 {
-    /// <summary>便捷方法使用的默认日志分类。</summary>
+    /// <summary>Default log category used by the convenience methods.</summary>
     public const string DefaultCategory = "Global";
 
-    // OnLog 订阅者异常时写给 Provider 的提示消息（直接走 Provider，避免递归触发事件）
-    private const string SubscriberFailureMessage = "OnLog 订阅者抛出异常，已由日志器吞掉并继续（请订阅方自行排查）。";
+    // Message written to the provider when an OnLog subscriber throws (goes straight to the provider to
+    // avoid recursively triggering the event).
+    private const string SubscriberFailureMessage = "An OnLog subscriber threw an exception; it was swallowed by the logger and execution continued (the subscriber should investigate).";
 
-    // ---- 初始化状态 ----
-    // double-checked locking；_factory/_logger 置 volatile，保证多线程下的可见性
+    // ---- Initialization state ----
+    // double-checked locking; _factory/_logger are volatile for cross-thread visibility.
     private static readonly object SyncRoot = new();
     private static volatile ILoggerFactory? _factory;
     private static volatile ILogger _logger = NullLogger.Instance;
 
-    // LogLevel 底层是 int，用 Volatile.Read/Write 做无锁读写，支持运行期随时调整总闸
+    // LogLevel is an int underneath; use Volatile.Read/Write for lock-free access, allowing runtime adjustment.
     private static int _minimumLevel = (int)LogLevel.Debug;
 
-    /// <summary>每一条通过总闸的日志都会触发。设置 <see cref="UiContext"/> 后回调会切到 UI 线程。
-    /// 订阅者抛异常不会影响调用方（会被捕获并记一条日志）。</summary>
+    /// <summary>Raised for every log that passes the master switch. If <see cref="UiContext"/> is set, the callback is marshaled to the UI thread.
+    /// A subscriber throwing does not affect the caller (it is caught and logged once).</summary>
     public static event Action<LogLevel, string, Exception?>? OnLog;
 
-    /// <summary>设置后，<see cref="OnLog"/> 回调会 Post 到该 SynchronizationContext（通常为 UI 线程）。</summary>
+    /// <summary>When set, <see cref="OnLog"/> callbacks are posted to this SynchronizationContext (usually the UI thread).</summary>
     public static SynchronizationContext? UiContext { get; set; }
 
-    /// <summary>运行期日志级别总闸：低于该级别的不写 Provider、也不触发 <see cref="OnLog"/>。线程安全。</summary>
+    /// <summary>Runtime log-level master switch: levels below this are neither written to providers nor raise <see cref="OnLog"/>. Thread-safe.</summary>
     public static LogLevel MinimumLevel
     {
         get => (LogLevel)Volatile.Read(ref _minimumLevel);
         set => Volatile.Write(ref _minimumLevel, (int)value);
     }
 
-    /// <summary>查询该级别当前是否会被记录（热路径可用它避免提前拼字符串）。</summary>
+    /// <summary>Queries whether the given level is currently logged (hot paths can avoid eagerly building strings).</summary>
     public static bool IsEnabled(LogLevel level) => level >= MinimumLevel;
 
-    /// <summary>显式初始化（线程安全、幂等）。configure 为空用默认彩色控制台；否则 Provider 由调用方完全接管。</summary>
+    /// <summary>Explicit initialization (thread-safe, idempotent). With a null configure, a provider-less default factory is used; otherwise providers are fully owned by the caller.</summary>
     public static void Initialize(Action<ILoggingBuilder>? configure = null)
     {
         lock (SyncRoot)
@@ -63,7 +69,7 @@ public static class Logger
         }
     }
 
-    /// <summary>释放内部 LoggerFactory（冲刷 Provider 写队列），之后允许再次 <see cref="Initialize"/>。Host 退出前调用。</summary>
+    /// <summary>Disposes the internal LoggerFactory (flushing provider write queues); <see cref="Initialize"/> may be called again. Call before Host exit.</summary>
     public static void Shutdown()
     {
         lock (SyncRoot)
@@ -75,7 +81,7 @@ public static class Logger
         }
     }
 
-    // ---- 便捷日志方法（分类固定为 DefaultCategory）----
+    // ---- Convenience methods (category fixed to DefaultCategory) ----
 
     public static void Trace(string message) => Log(LogLevel.Trace, message);
     public static void Debug(string message) => Log(LogLevel.Debug, message);
@@ -85,21 +91,22 @@ public static class Logger
     public static void Error(Exception ex) => Log(LogLevel.Error, ex.Message, ex);
     public static void Critical(string message, Exception? ex = null) => Log(LogLevel.Critical, message, ex);
 
-    // ---- 分类（category）支持：需要按子系统路由/过滤时使用 ----
+    // ---- Category support: use when routing/filtering per subsystem ----
 
-    /// <summary>以指定分类获取 <see cref="ILogger"/>（与便捷方法共享同一套 Provider 与过滤）。</summary>
+    /// <summary>Gets an <see cref="ILogger"/> for a given category (shares the same providers and filtering as the convenience methods).</summary>
     public static ILogger GetLogger(string category)
     {
         EnsureInitialized();
         return _factory!.CreateLogger(category);
     }
 
-    /// <summary>以类型全名作为分类获取 <see cref="ILogger"/>。</summary>
+    /// <summary>Gets an <see cref="ILogger"/> using the type's full name as the category.</summary>
     public static ILogger GetLogger<T>() => GetLogger(typeof(T).FullName ?? typeof(T).Name);
 
-    // ---- 内部实现 ----
+    // ---- Internal implementation ----
 
-    // 总入口：过总闸（低于 MinimumLevel 直接丢弃）→ 确保已初始化 → 写全部 Provider → 触发 OnLog
+    // Entry point: pass the master switch (drop below MinimumLevel) → ensure initialized → write to all
+    // providers → raise OnLog.
     private static void Log(LogLevel level, string message, Exception? exception = null)
     {
         if (!IsEnabled(level)) return;
@@ -108,33 +115,33 @@ public static class Logger
         RaiseEvent(level, message, exception);
     }
 
-    // 自动初始化：首个日志/GetLogger 触发时按默认（仅控制台）补建，供未显式配置的快速路径使用
+    // Auto-initialization: on the first log/GetLogger, build the default (provider-less) factory for the
+    // quick path when not explicitly configured.
     private static void EnsureInitialized()
     {
-        if (_factory != null) return; // fast path（volatile 读）
+        if (_factory != null) return; // fast path (volatile read)
         lock (SyncRoot)
         {
-            if (_factory != null) return; // 双检锁
+            if (_factory != null) return; // double-checked lock
             _factory = BuildFactory(null);
             _logger = _factory.CreateLogger(DefaultCategory);
         }
     }
 
-    // 建工厂：Provider 统一放宽到 Trace（避免 M.E.L 默认 Information 过滤把 Debug 吞掉），
-    // 级别过滤交给 MinimumLevel 总闸；无 configure 时附加默认彩色控制台
+    // Build the factory: relax the provider-wide minimum to Trace (so M.E.L's default Information filter
+    // does not swallow Debug), leaving the real filtering to the MinimumLevel master switch. With no
+    // configure, no providers are attached (only OnLog is available).
     private static ILoggerFactory BuildFactory(Action<ILoggingBuilder>? configure)
     {
         return LoggerFactory.Create(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Trace);
-            if (configure == null)
-                builder.AddConsole(options => options.FormatterName = ConsoleFormatterNames.Simple);
-            else
-                configure(builder);
+            configure?.Invoke(builder);
         });
     }
 
-    // 触发事件：先快照订阅者（防并发期间事件被增删），再同步调用或 Post 到 UiContext；异常全程不外泄
+    // Raise the event: snapshot subscribers first (to survive concurrent add/remove), then invoke
+    // synchronously or post to UiContext; exceptions never leak.
     private static void RaiseEvent(LogLevel level, string message, Exception? exception)
     {
         var handler = OnLog;
@@ -162,11 +169,11 @@ public static class Logger
         }
         catch (Exception ex)
         {
-            ReportSubscriberFailure(ex); // 订阅者异常绝不能击穿日志调用方
+            ReportSubscriberFailure(ex); // A subscriber exception must never break through to the caller.
         }
     }
 
-    // 订阅者异常直接写 Provider（不触发 OnLog，避免递归）
+    // A subscriber failure is written directly to the provider (not raising OnLog, to avoid recursion).
     private static void ReportSubscriberFailure(Exception exception)
     {
         var logger = _logger;
@@ -177,7 +184,7 @@ public static class Logger
         }
         catch
         {
-            // Provider 自身异常也不能再抛出
+            // A provider exception must also not be rethrown.
         }
     }
 }

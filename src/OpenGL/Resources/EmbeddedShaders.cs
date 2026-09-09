@@ -7,16 +7,16 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
-/// 标准着色器目录：GLSL 源文件位于本程序集 <c>Shaders/</c> 目录
-/// （Model/Line/Point/Skybox 各自的 .vert/.frag），以嵌入式资源随
-/// RobotSimulation.OpenGL 分发。Core 侧只约定 <see cref="RenderPassKind"/> 通道，
-/// 宿主无需管理 shader 文件路径；编辑 GLSL 直接改 <c>Shaders/*.vert|frag</c> 即可。
+/// Standard shader catalog: the GLSL source files live in this assembly's <c>Shaders/</c> directory
+/// (Model/Line/Point/Skybox each with a .vert/.frag), distributed as embedded resources with
+/// RobotSimulation.OpenGL. The Core side only agrees on the <see cref="RenderPassKind"/> passes; the
+/// host needs no shader file paths. Edit GLSL directly under <c>Shaders/*.vert|frag</c>.
 /// </summary>
 public static class EmbeddedShaders
 {
     private static readonly Assembly Self = typeof(EmbeddedShaders).Assembly;
 
-    /// <summary>按通道取 (顶点, 片段) 源码。</summary>
+    /// <summary>Gets the (vertex, fragment) sources for a pass.</summary>
     public static (string Vertex, string Fragment) Get(RenderPassKind pass) => pass switch
     {
         RenderPassKind.Model => (Read("Model.vert"), Read("Model.frag")),
@@ -27,7 +27,7 @@ public static class EmbeddedShaders
         _ => throw new ArgumentOutOfRangeException(nameof(pass)),
     };
 
-    /// <summary>读取嵌入的 GLSL 文本（资源名以 ".Shaders.{fileName}" 结尾，忽略程序集根命名空间差异）。</summary>
+    /// <summary>Reads the embedded GLSL text (resource names end with ".Shaders.{fileName}", ignoring any assembly-root namespace difference).</summary>
     private static string Read(string fileName)
     {
         string suffix = $".Shaders.{fileName}";
@@ -36,8 +36,8 @@ public static class EmbeddedShaders
 
         if (resourceName is null)
             throw new FileNotFoundException(
-                $"找不到内嵌着色器资源 '{suffix}'。" +
-                "请确认 RobotSimulation.OpenGL 工程的 Shaders/ 目录下的 .vert/.frag 已被包含为 EmbeddedResource。");
+                $"Embedded shader resource '{suffix}' not found." +
+                "Confirm the .vert/.frag files under RobotSimulation.OpenGL's Shaders/ directory are included as EmbeddedResource.");
 
         using Stream stream = Self.GetManifestResourceStream(resourceName)!;
         using var reader = new StreamReader(stream);

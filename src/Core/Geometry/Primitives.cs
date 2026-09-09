@@ -4,34 +4,36 @@ using System.Numerics;
 namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// 基本图元网格的共享生成实现（internal，非公共 API）：图元 GameObject 派生类
-/// （Box / Sphere / Cylinder / Capsule / GroundPlane）在构造时调用本类静态方法。
-/// 输出约定：
-///  - 全部为“局部坐标”网格；圆柱/胶囊/球体的回转轴沿 +Z（与 URDF/ROS 几何语义一致）；
-///  - 三角形一律保证“从外表面看为 CCW”，可直接配合 CullFace.Back 渲染；
-///  - 顶点格式为 MeshData：pos(3) + uv(2) + normal(3) + tangent(3)。
+/// Shared mesh generation for basic primitives (internal, not a public API): the primitive
+/// GameObject derived classes (Box / Sphere / Cylinder / Capsule / GroundPlane) call these static
+/// methods at construction. Output conventions:
+///  - All are "local coordinate" meshes; the revolution axis of cylinders/capsules/spheres is +Z
+///    (consistent with URDF/ROS geometry);
+///  - Triangles are always CCW viewed from outside, so they can be rendered with CullFace.Back;
+///  - Vertex format is MeshData: pos(3) + uv(2) + normal(3) + tangent(3).
 /// </summary>
 internal static class Primitives
 {
-    // ---- 参数校验 ----
+    // ---- Argument validation ----
 
     private static void EnsurePositive(string name, float value)
     {
         if (value <= 0f || float.IsNaN(value) || float.IsInfinity(value))
-            throw new ArgumentOutOfRangeException(name, value, $"{name} 必须为正的有限数值。");
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be a positive finite value.");
     }
 
     private static void EnsureAtLeast(string name, int value, int min)
     {
         if (value < min)
-            throw new ArgumentOutOfRangeException(name, value, $"{name} 不能小于 {min}。");
+            throw new ArgumentOutOfRangeException(name, value, $"{name} cannot be less than {min}.");
     }
 
-    // ---- 几何工具 ----
+    // ---- Geometry helpers ----
 
     /// <summary>
-    /// 添加一个三角形，并用外法线参考方向 <paramref name="outwardNormal"/>
-    /// 自动修正绕序，保证从外侧看为 CCW。outwardNormal 只需"大致朝外"。
+    /// Adds a triangle and auto-corrects the winding using the outward-normal reference
+    /// <paramref name="outwardNormal"/>, guaranteeing CCW viewed from outside. The reference only
+    /// needs to point roughly outward.
     /// </summary>
     private static void AddOrientedTriangle(MeshData mesh, uint ia, uint ib, uint ic, Vector3 outwardNormal)
     {
@@ -44,20 +46,21 @@ internal static class Primitives
         mesh.AddTriangle(ia, ib, ic);
     }
 
-    /// <summary>三角形三个顶点的几何平均（位于表面内侧一点，用于取外法线参考方向）。</summary>
+    /// <summary>Geometric average of a triangle's three vertices (a point slightly inside the surface, used as an outward normal reference).</summary>
     private static Vector3 Centroid(MeshData mesh, uint a, uint b, uint c)
         => (mesh.Positions[(int)a] + mesh.Positions[(int)b] + mesh.Positions[(int)c]) / 3f;
 
-    /// <summary>保留 xy 分量并归一化（用于圆柱/胶囊侧面的径向朝外方向）。</summary>
+    /// <summary>Keeps the xy components and normalizes (used for the radial outward direction of cylinder/capsule sides).</summary>
     private static Vector3 NormalizeXY(Vector3 v)
         => Vector3.Normalize(new Vector3(v.X, v.Y, 0f));
 
     // =====================================================================
-    // 立方体（盒体）
+    // Box
     // =====================================================================
 
     /// <summary>
-    /// 生成立方体，尺寸分别对应 x/y/z 轴宽度。每面 4 个独立顶点，法线为硬边面法线。
+    /// Creates a box with widths along the x/y/z axes. Each face uses 4 independent vertices with
+    /// hard-edged face normals.
     /// </summary>
     internal static MeshData CreateBox(float width, float height, float depth)
     {
@@ -67,9 +70,11 @@ internal static class Primitives
 
         var mesh = new MeshData();
 
-        // (外法线 N, 面的中心偏移 CenterOffset, 切线 U, 面内两个尺寸 SizeU/SizeV)。
-        // 副法线 V = cross(N, U)，满足 U×V = N，因此四角点 (c00,c10,c11,c01) 排列后三角形天然 CCW。
-        // 关键：每个面的矩形必须沿法线偏移到 ±对应半宽（否则六个面都过原点，退化为"扁十字"）。
+        // (Outward normal N, face center offset, tangent U, in-plane sizes SizeU/SizeV).
+        // Bitangent V = cross(N, U) satisfies U×V = N, so the four corners (c00,c10,c11,c01) yield
+        // naturally CCW triangles. Key point: each face rectangle must be offset along its normal to
+        // ± the corresponding half-width (otherwise all six faces pass through the origin, degenerating
+        // into a flat "cross").
         Span<(Vector3 Normal, Vector3 CenterOffset, Vector3 Tangent, float SizeU, float SizeV)> faces =
             stackalloc (Vector3 Normal, Vector3 CenterOffset, Vector3 Tangent, float SizeU, float SizeV)[]
             {
@@ -100,12 +105,13 @@ internal static class Primitives
     }
 
     // =====================================================================
-    // 球体
+    // Sphere
     // =====================================================================
 
     /// <summary>
-    /// 生成经纬球（UV 球）。极点行的每"列"是独立顶点，便于纹理沿经线闭合。
-    /// <paramref name="segments"/> 为圆周分段数，<paramref name="rings"/> 为纬线分段数。
+    /// Generates a UV sphere. Each "column" in a pole row is an independent vertex so the texture can
+    /// wrap around the meridian. <paramref name="segments"/> is the circumferential segment count and
+    /// <paramref name="rings"/> the latitude segment count.
     /// </summary>
     internal static MeshData CreateSphere(float radius, int segments = 32, int rings = 16)
     {
@@ -115,8 +121,9 @@ internal static class Primitives
 
         var mesh = new MeshData();
 
-        // 纬线行 k = 0..rings，纬度 φ = π/2 - k·(π/rings)（0=北极，rings=南极）。
-        // 中间行含 segments+1 列（末列与首列重合，闭合绕回）；极点行仅 segments 列。
+        // Latitude rows k = 0..rings, latitude φ = π/2 - k·(π/rings) (0 = north pole, rings = south pole).
+        // Middle rows contain segments+1 columns (last column coincides with the first, closing the wrap);
+        // pole rows contain only segments columns.
         var rowBase = new uint[rings + 1];
         var rowCols = new int[rings + 1];
 
@@ -158,8 +165,8 @@ internal static class Primitives
 
         for (int k = 0; k < rings; k++)
         {
-            bool fromPole = k == 0;           // 北极扇区
-            bool toPole = k == rings - 1;     // 南极扇区
+            bool fromPole = k == 0;           // North pole sector
+            bool toPole = k == rings - 1;     // South pole sector
 
             for (int i = 0; i < segments; i++)
             {
@@ -193,12 +200,13 @@ internal static class Primitives
     }
 
     // =====================================================================
-    // 圆柱体
+    // Cylinder
     // =====================================================================
 
     /// <summary>
-    /// 生成圆柱：回转轴沿 +Z（URDF/ROS 语义），高为 <paramref name="length"/>。
-    /// 侧面平滑共享法线；顶/底盖使用各自独立的硬边法线（±Z）。
+    /// Generates a cylinder whose revolution axis is +Z (URDF/ROS semantics) with height
+    /// <paramref name="length"/>. The side shares smooth normals; the top/bottom caps use their own
+    /// hard-edged normals (±Z).
     /// </summary>
     internal static MeshData CreateCylinder(float radius, float length, int segments = 32)
     {
@@ -209,7 +217,7 @@ internal static class Primitives
         var mesh = new MeshData();
         float half = length * 0.5f;
 
-        // ---- 侧面：底部环(z=-half) + 顶部环(z=+half)，各 segments+1 列 ----
+        // ---- Side: bottom ring (z=-half) + top ring (z=+half), with segments+1 columns each ----
         uint bottom = (uint)mesh.VertexCount;
         for (int i = 0; i <= segments; i++)
         {
@@ -238,7 +246,7 @@ internal static class Primitives
                 new Vector3(-sin, cos, 0f));
         }
 
-        // 侧面条带（外法线参考取径向方向，忽略 z 分量）
+        // Side strip (outward normal reference takes the radial direction, ignoring the z component)
         for (int i = 0; i < segments; i++)
         {
             uint b0 = bottom + (uint)i;
@@ -250,31 +258,17 @@ internal static class Primitives
             AddOrientedTriangle(mesh, t0, b1, t1, NormalizeXY(Centroid(mesh, t0, b1, t1)));
         }
 
-        // ---- 顶盖（法线 +Z）：中心 + 独立 rim 环 ----
-        uint topCenter = mesh.AddVertex(
-            new Vector3(0f, 0f, half), Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
-
-        var topRim = new uint[segments];
+        // ---- Top cap (facing +Z) ----
+        uint topCenter = mesh.AddVertex(new Vector3(0f, 0f, half), Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
         for (int i = 0; i < segments; i++)
         {
-            float theta = i * MathF.Tau / segments;
-            float cos = MathF.Cos(theta);
-            float sin = MathF.Sin(theta);
-
-            topRim[i] = mesh.AddVertex(
-                new Vector3(radius * cos, radius * sin, half),
-                Vector3.UnitZ,
-                new Vector2(cos * 0.5f + 0.5f, sin * 0.5f + 0.5f),
-                new Vector3(-sin, cos, 0f));
+            uint a = top + (uint)i;
+            uint b = top + (uint)((i + 1) % segments);
+            AddOrientedTriangle(mesh, topCenter, a, b, Vector3.UnitZ);
         }
 
-        for (int i = 0; i < segments; i++)
-            AddOrientedTriangle(mesh, topCenter, topRim[i], topRim[(i + 1) % segments], Vector3.UnitZ);
-
-        // ---- 底盖（法线 -Z）：中心 + 独立 rim 环 ----
-        uint bottomCenter = mesh.AddVertex(
-            new Vector3(0f, 0f, -half), -Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
-
+        // ---- Bottom cap (facing -Z) ----
+        uint bottomCenter = mesh.AddVertex(new Vector3(0f, 0f, -half), -Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
         var bottomRim = new uint[segments];
         for (int i = 0; i < segments; i++)
         {
@@ -296,12 +290,13 @@ internal static class Primitives
     }
 
     // =====================================================================
-    // 胶囊体
+    // Capsule
     // =====================================================================
 
     /// <summary>
-    /// 生成胶囊体：回转轴沿 +Z（URDF/ROS 语义）。<paramref name="length"/> 为中间
-    /// 圆柱段长度（不含两端半球帽），总高 = length + 2·radius。
+    /// Generates a capsule whose revolution axis is +Z (URDF/ROS semantics). <paramref name="length"/>
+    /// is the middle cylinder segment length (excluding the hemispherical caps), so the total height is
+    /// length + 2·radius.
     /// </summary>
     internal static MeshData CreateCapsule(float radius, float length, int segments = 32, int rings = 8)
     {
@@ -310,7 +305,7 @@ internal static class Primitives
         EnsureAtLeast(nameof(segments), segments, 3);
         EnsureAtLeast(nameof(rings), rings, 2);
 
-        // 圆柱段长度为 0 时退化为球
+        // A zero-length cylinder segment degenerates to a sphere.
         if (length <= 1e-5f)
             return CreateSphere(radius, segments, Math.Max(2, rings));
 
@@ -318,11 +313,11 @@ internal static class Primitives
         float half = length * 0.5f;
         float totalHeight = length + 2f * radius;
 
-        // 每半球壳 rings 条纬线，中部圆柱段再补若干行
+        // Each hemisphere adds 'rings' latitude rows; the middle cylinder adds a few more rows.
         int midRows = Math.Max(2, (int)MathF.Ceiling(length / radius));
-        int rowSteps = 2 * rings + midRows;   // 相邻行之间的"纬度步数"
+        int rowSteps = 2 * rings + midRows;   // "latitude steps" between adjacent rows.
 
-        // 三角片外法线参考：球帽区指向球心方向，中部指向回转轴径向
+        // Outward normal reference for a triangle: sphere caps point toward the arc center, the middle points radially.
         Vector3 ArcOutward(Vector3 c)
         {
             if (c.Z >= half)
@@ -332,7 +327,7 @@ internal static class Primitives
             return NormalizeXY(c);
         }
 
-        // 沿轮廓自南极到北极的弧长占比（用于 UV 的 v 坐标，保证贴图不拉伸）
+        // Arc length fraction from south pole to this z (used for UV v so the texture does not stretch).
         float ArcFraction(float z)
         {
             float totalArc = radius * MathF.PI + length;
@@ -360,19 +355,19 @@ internal static class Primitives
                 ? totalHeight * 0.5f
                 : -totalHeight * 0.5f + totalHeight * k / rowSteps;
 
-            // 该高度处的截面半径 rho 与法线的水平分量比例 nxy（解析值）
+            // Cross-section radius rho and the horizontal normal scale nxy at this height (closed forms).
             float rho, nxy;
             if (z >= half)
             {
                 float d = MathF.Min(z - half, radius);
                 rho = MathF.Sqrt(radius * radius - d * d);
-                nxy = rho / radius;              // 法线 z 分量 = d / radius
+                nxy = rho / radius;              // normal z component = d / radius
             }
             else if (z <= -half)
             {
                 float d = MathF.Min(-(z + half), radius);
                 rho = MathF.Sqrt(radius * radius - d * d);
-                nxy = rho / radius;              // 法线 z 分量 = -d / radius
+                nxy = rho / radius;              // normal z component = -d / radius
             }
             else
             {
@@ -418,8 +413,8 @@ internal static class Primitives
 
         for (int k = 0; k < rowSteps; k++)
         {
-            bool fromPole = k == 0;              // 南极扇区
-            bool toPole = k == rowSteps - 1;     // 北极扇区
+            bool fromPole = k == 0;              // South pole sector
+            bool toPole = k == rowSteps - 1;     // North pole sector
 
             for (int i = 0; i < segments; i++)
             {
@@ -453,12 +448,12 @@ internal static class Primitives
     }
 
     // =====================================================================
-    // 圆锥（Arrow 箭头等使用；轴沿 +Z，与 URDF/ROS 语义一致）
+    // Cone (used by Arrow; axis along +Z, consistent with URDF/ROS)
     // =====================================================================
 
     /// <summary>
-    /// 生成圆锥：回转轴沿 +Z，底面（半径 <paramref name="radius"/>）位于 z = -height/2，
-    /// 顶点位于 +height/2。底面封口、侧面含法线。
+    /// Generates a cone: its revolution axis is +Z, the base (radius <paramref name="radius"/>) lies at
+    /// z = -height/2 and the apex at +height/2. The base is capped and the side carries normals.
     /// </summary>
     internal static MeshData CreateCone(float radius, float height, int segments = 24)
     {
@@ -467,11 +462,11 @@ internal static class Primitives
         EnsureAtLeast(nameof(segments), segments, 3);
 
         var mesh = new MeshData();
-        float side = MathF.Atan2(radius, height);   // 侧面与水平面的倾角 → 法线
+        float side = MathF.Atan2(radius, height);   // side inclination to the horizontal plane → normal
         float cosSide = MathF.Cos(side);
         float sinSide = MathF.Sin(side);
 
-        // 底面环
+        // Base ring
         var ring = new uint[segments];
         for (int i = 0; i < segments; i++)
         {
@@ -486,7 +481,7 @@ internal static class Primitives
 
         uint apex = mesh.AddVertex(new Vector3(0f, 0f, height * 0.5f), Vector3.UnitZ, new Vector2(0.5f, 1f), Vector3.UnitX);
 
-        // 侧面（外法线参考：环上当前顶点的斜向法线）
+        // Side (outward normal reference: the slanted normal of the current ring vertex)
         for (int i = 0; i < segments; i++)
         {
             uint next = ring[(i + 1) % segments];
@@ -496,7 +491,7 @@ internal static class Primitives
             AddOrientedTriangle(mesh, apex, next, ring[i], outward);
         }
 
-        // 底面封口（朝 -Z）
+        // Base cap (facing -Z)
         uint center = mesh.AddVertex(new Vector3(0f, 0f, -height * 0.5f), -Vector3.UnitZ, new Vector2(0.5f, 0.5f), Vector3.UnitX);
         for (int i = 0; i < segments; i++)
         {
@@ -508,12 +503,13 @@ internal static class Primitives
     }
 
     // =====================================================================
-    // 平面
+    // Plane
     // =====================================================================
 
     /// <summary>
-    /// 生成水平地面：位于 XY 平面（z = 0），法线朝 +Z，宽 <paramref name="width"/>（沿 X）、
-    /// 深 <paramref name="depth"/>（沿 Y）。用于 Z-up 引擎（与 URDF/ROS 世界约定一致）。
+    /// Generates a horizontal ground on the XY plane (z = 0) with normal +Z, width <paramref name="width"/>
+    /// (along X) and depth <paramref name="depth"/> (along Y). For a Z-up engine (matching the URDF/ROS
+    /// world convention).
     /// </summary>
     internal static MeshData CreatePlane(float width, float depth)
     {

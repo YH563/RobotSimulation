@@ -6,55 +6,57 @@ using RobotSimulation.Core.Geometry;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 场景图容器：持有场景根对象树、活动相机、一组光源，以及场景的显示默认设置
-/// （背景/环境光/网格地面）。设置直接作为本类可读写属性 + 默认装配方法存在，
-/// 不单独拆"设置/默认值"类——开箱即用的数值就是下面的默认值。
+/// Scene-graph container: holds the scene's root object tree, the active camera, a set of lights, and
+/// the scene's display defaults (background/ambient light/grid floor). The settings are exposed as
+/// read-write properties on this class plus default assembly methods — there is no separate
+/// "settings/defaults" class; the out-of-the-box values are the defaults below.
 /// </summary>
 public class SceneGraph : IDisposable
 {
     private readonly List<GameObject> _roots = new();
     private readonly List<Light> _lights = new();
 
-    /// <summary>场景根节点（供渲染器遍历与外部只读访问）。</summary>
+    /// <summary>Root nodes of the scene (for renderer traversal and external read-only access).</summary>
     public IReadOnlyList<GameObject> Roots => _roots;
 
-    /// <summary>场景活动相机（默认内置一个轨道相机，可整体替换）。</summary>
+    /// <summary>The scene's active camera (a built-in orbit camera by default; can be replaced entirely).</summary>
     public Camera Camera { get; set; } = new Camera();
 
-    // ---- 场景显示默认设置（宿主/UI 直接读写这些属性即可）----
+    // ---- Scene display defaults (host/UI reads and writes these properties directly) ----
 
-    /// <summary>清屏/背景色（中等灰，作为默认"天空"底色）。</summary>
+    /// <summary>Clear/background color (medium gray, the default "sky" base).</summary>
     public Vector4 BackgroundColor { get; set; } = new(0.20f, 0.22f, 0.25f, 1f);
 
-    /// <summary>环境光（RGB 强度，0-1）。阴面亮度由它兜底，避免过黑。</summary>
+    /// <summary>Ambient light (RGB intensity, 0-1). Provides the floor for shadowed faces so they do not go black.</summary>
     public Vector3 AmbientColor { get; set; } = new(0.30f, 0.32f, 0.36f);
 
-    /// <summary>是否显示默认网格地面（<see cref="AddDefaultGrid"/> 依据它创建）。</summary>
+    /// <summary>Whether to show the default grid floor (<see cref="AddDefaultGrid"/> creates it based on this).</summary>
     public bool ShowGrid { get; set; } = true;
 
-    /// <summary>是否显示默认世界原点坐标轴（<see cref="AddDefaultWorldAxes"/> 依据它创建）。</summary>
+    /// <summary>Whether to show the default world-origin axes (<see cref="AddDefaultWorldAxes"/> creates it based on this).</summary>
     public bool ShowWorldAxes { get; set; } = true;
 
-    /// <summary>默认世界原点坐标轴的长度。</summary>
+    /// <summary>Length of the default world-origin axes.</summary>
     public float WorldAxesLength { get; set; } = 0.5f;
 
-    /// <summary>单格边长（米）。</summary>
+    /// <summary>Cell edge length (meters).</summary>
     public float GridCellSize { get; set; } = 1f;
 
-    /// <summary>中心往每个方向的格数（总跨度 = 2 × GridCellCount × GridCellSize）。</summary>
+    /// <summary>Cell count from the center in each direction (total span = 2 × GridCellCount × GridCellSize).</summary>
     public int GridCellCount { get; set; } = 10;
 
-    /// <summary>网格线颜色。</summary>
+    /// <summary>Grid line color.</summary>
     public Vector4 GridColor { get; set; } = new(0.30f, 0.30f, 0.35f, 1f);
 
-    /// <summary>场景中的所有光源（由 <see cref="Add"/> 自动收集）。</summary>
+    /// <summary>All lights in the scene (collected automatically by <see cref="Add"/>).</summary>
     public IReadOnlyList<Light> Lights => _lights;
 
     private bool _disposed;
 
     /// <summary>
-    /// 构造即完成默认场景装配：默认相机姿态、默认灯光、网格地面、世界原点坐标轴。
-    /// 不需要宿主再手动调用（宿主只负责添加上层内容，如 URDF 机器人、演示对象）。
+    /// Construction completes the default scene assembly: default camera pose, default lights, grid
+    /// floor, world-origin axes. The host does not need to call these manually (it only adds its own
+    /// content, such as a URDF robot or demo objects).
     /// </summary>
     public SceneGraph()
     {
@@ -65,8 +67,8 @@ public class SceneGraph : IDisposable
     }
 
     /// <summary>
-    /// 添加对象（自动识别是否为根节点）。若 <paramref name="obj"/> 是 <see cref="Light"/>
-    /// 且此前未登记，则同时加入 <see cref="Lights"/>。
+    /// Adds an object (auto-detecting whether it is a root node). If <paramref name="obj"/> is a
+    /// <see cref="Light"/> and not already registered, it is also added to <see cref="Lights"/>.
     /// </summary>
     public void Add(GameObject? obj)
     {
@@ -79,7 +81,8 @@ public class SceneGraph : IDisposable
     }
 
     /// <summary>
-    /// 移除游戏对象，自动从父级或根列表中移除；若是 <see cref="Light"/> 同时从光源列表移除。
+    /// Removes a game object, detaching it from its parent or the root list; if it is a <see cref="Light"/>
+    /// it is also removed from the lights list.
     /// </summary>
     public void Remove(GameObject? obj)
     {
@@ -90,37 +93,37 @@ public class SceneGraph : IDisposable
 
         if (obj.Transform.Parent == null)
         {
-            // 如果是根节点，直接从根列表移除
+            // If it is a root node, remove it from the root list.
             _roots.Remove(obj);
         }
         else
         {
-            // 如果不是根节点，将 Parent 设为 null，自动从父级 Children 移除
+            // If it is not a root, set Parent to null, which auto-detaches it from its parent's Children.
             obj.Transform.Parent = null;
         }
     }
 
     // ------------------------------------------------------------------
-    // 默认场景装配（网格 / 灯光 / 相机初始姿态；无需独立"设置类"）
+    // Default scene assembly (grid / lights / initial camera pose; no separate "settings class")
     // ------------------------------------------------------------------
 
-    /// <summary>按当前网格属性创建并加入网格地面；<see cref="ShowGrid"/> 关闭时不创建。</summary>
+    /// <summary>Creates and adds the grid floor from the current grid properties; does not create it when <see cref="ShowGrid"/> is off.</summary>
     public Grid? AddDefaultGrid()
     {
         if (!ShowGrid)
             return null;
 
         var grid = new Grid(GridCellSize, GridCellCount, GridColor);
-        grid.SetSubtreePickable(false);   // 网格是参考平面，不应参与拾取
+        grid.SetSubtreePickable(false);   // The grid is a reference plane and should not participate in picking.
         Add(grid);
         return grid;
     }
 
-    /// <summary>加入默认主光 + 补光。</summary>
+    /// <summary>Adds the default key light plus a fill light.</summary>
     public void AddDefaultLights()
     {
         var key = new Light("key_light") { Color = Vector3.One, Intensity = 0.85f };
-        key.Transform.Position = new Vector3(4f, 5f, 10f);   // Z-up：置于地面上方
+        key.Transform.Position = new Vector3(4f, 5f, 10f);   // Z-up: place it above the ground.
         Add(key);
 
         var fill = new Light("fill_light") { Color = new Vector3(0.55f, 0.55f, 0.65f), Intensity = 0.4f };
@@ -128,19 +131,19 @@ public class SceneGraph : IDisposable
         Add(fill);
     }
 
-    /// <summary>按 <see cref="ShowWorldAxes"/> 创建并加入世界原点的默认全局坐标轴；关闭时不创建。</summary>
+    /// <summary>Creates and adds the default global axes at the world origin based on <see cref="ShowWorldAxes"/>; does not create when off.</summary>
     public Axes? AddDefaultWorldAxes()
     {
         if (!ShowWorldAxes)
             return null;
 
         var axes = new Axes(WorldAxesLength, name: "world-axes") { Transform = { Position = Vector3.Zero } };
-        axes.SetSubtreePickable(false);   // 坐标轴是显示辅助，不应参与拾取
+        axes.SetSubtreePickable(false);   // The axes are a display aid and should not participate in picking.
         Add(axes);
         return axes;
     }
 
-    /// <summary>把相机摆到默认初始姿态（就近观察场景）。</summary>
+    /// <summary>Poses the camera to the default initial pose (viewing the scene up close).</summary>
     public void ApplyDefaultCamera()
     {
         Camera.Target = new Vector3(0f, 0f, 0.3f);
@@ -150,14 +153,15 @@ public class SceneGraph : IDisposable
     }
 
     /// <summary>
-    /// 对场景中所有"可见且可拾取且含网格"的节点做射线拾取，返回最近的命中；无命中返回 null。
-    /// 默认只拾取 <see cref="GameObject.Visible"/> 与 <see cref="GameObject.Pickable"/> 均为 true
-    /// 且 <see cref="GameObject.MeshData"/> 非空的对象；网格地面、坐标轴等 <see cref="LineData"/>、
-    /// Point cloud <see cref="PointCloud2Data"/> carries no lighting and is skipped during picking.
+    /// Ray-picks all "visible, pickable, mesh-carrying" nodes in the scene and returns the nearest hit,
+    /// or null if none. By default it only picks objects where <see cref="GameObject.Visible"/> and
+    /// <see cref="GameObject.Pickable"/> are both true and <see cref="GameObject.MeshData"/> is non-null;
+    /// <see cref="LineData"/>-based nodes (grid floor, axes) and point-cloud
+    /// <see cref="PointCloud2Data"/> carry no lighting and are skipped during picking.
     /// </summary>
-    /// <param name="ray">世界空间射线（建议来自 <see cref="Camera.ScreenToWorldRay"/>）。</param>
-    /// <param name="predicate">可选过滤器（如只拾取某类/某个 link）；返回 true 才参与拾取。</param>
-    /// <param name="hitInvisible">为 true 时也会命中不可见对象。</param>
+    /// <param name="ray">A world-space ray (ideally from <see cref="Camera.ScreenToWorldRay"/>).</param>
+    /// <param name="predicate">Optional filter (e.g. only a certain kind/link); return true to participate.</param>
+    /// <param name="hitInvisible">When true, also hit invisible objects.</param>
     public RaycastHit? Pick(Ray ray, Func<GameObject, bool>? predicate = null, bool hitInvisible = false)
     {
         RaycastHit? best = null;
@@ -167,15 +171,16 @@ public class SceneGraph : IDisposable
     }
 
     /// <summary>
-    /// 点选即高亮闭环：对 <paramref name="ray"/> 执行 <see cref="Pick"/>，命中后把该对象的
-    /// <see cref="GameObject.Highlighted"/> 设为 <paramref name="enable"/>（默认 true），并返回命中对象；
-    /// 未命中返回 null。纯转发的辅助方法——只设置高亮数据，不接管宿主输入框架（如鼠标事件轮询）。
+    /// Pick-and-highlight closed loop: runs <see cref="Pick"/> on <paramref name="ray"/>, and on a hit
+    /// sets that object's <see cref="GameObject.Highlighted"/> to <paramref name="enable"/> (default true)
+    /// and returns it; returns null on a miss. A pure forwarding helper — it only sets highlight data and
+    /// does not own the host's input framework (e.g. mouse event polling).
     /// </summary>
-    /// <param name="ray">待检测的射线（世界坐标，建议来自 <see cref="Camera.ScreenToWorldRay"/>）。</param>
-    /// <param name="enable">命中时把 <see cref="GameObject.Highlighted"/> 置为 true/false。</param>
-    /// <param name="predicate">可选过滤：返回 false 的对象不参与命中（如只响应机器人节点）。</param>
-    /// <param name="hitInvisible">为 true 时也会命中不可见对象。</param>
-    /// <returns>命中的对象；未命中或射线不命中任何节点时返回 null。</returns>
+    /// <param name="ray">The ray to test (world coordinates, ideally from <see cref="Camera.ScreenToWorldRay"/>).</param>
+    /// <param name="enable">Whether to set <see cref="GameObject.Highlighted"/> true/false on a hit.</param>
+    /// <param name="predicate">Optional filter: objects returning false do not participate (e.g. only respond to robot nodes).</param>
+    /// <param name="hitInvisible">When true, also hit invisible objects.</param>
+    /// <returns>The hit object, or null if no ray/node was hit.</returns>
     public GameObject? PickAndHighlight(Ray ray, bool enable = true,
         Func<GameObject, bool>? predicate = null, bool hitInvisible = false)
     {
@@ -205,9 +210,10 @@ public class SceneGraph : IDisposable
     {
         Matrix4x4 model = node.Transform.GetModelMatrix();
         if (!Matrix4x4.Invert(model, out Matrix4x4 invModel))
-            return;   // 模型矩阵不可逆（如 scale=0），直接忽略
+            return;   // Non-invertible model matrix (e.g. scale=0): ignore.
 
-        // 把射线变换到节点局部空间：先对局部 AABB 粗筛，再逐三角形精确命中。
+        // Transform the ray into the node's local space: broad-phase against the local AABB, then
+        // per-triangle exact hits.
         Vector3 localOrigin = Vector3.Transform(ray.Origin, invModel);
         Vector3 localDir = Vector3.Normalize(Vector3.TransformNormal(ray.Direction, invModel));
         var localRay = new Ray(localOrigin, localDir);
@@ -242,7 +248,8 @@ public class SceneGraph : IDisposable
         if (bestLocalDist >= float.MaxValue)
             return;
 
-        // 局部命中点/法线变换回世界；世界距离按世界命中点与射线起点差计算（非均匀缩放下局部 t≠世界距离）。
+        // Transform the local hit point/normal back to world; world distance is measured from the world
+        // hit point to the ray origin (under non-uniform scaling local t ≠ world distance).
         Vector3 worldPoint = Vector3.Transform(bestLocalPoint, model);
         Vector3 worldNormal = Vector3.Normalize(Vector3.TransformNormal(bestLocalNormal, model));
         float distance = (worldPoint - ray.Origin).Length();
@@ -252,7 +259,7 @@ public class SceneGraph : IDisposable
     }
 
     /// <summary>
-    /// 递归更新所有节点（由后台线程调用，严禁操作 OpenGL）
+    /// Recursively updates all nodes (called from a background thread; never manipulate OpenGL here).
     /// </summary>
     public void Update(double deltaTime)
     {
@@ -271,8 +278,8 @@ public class SceneGraph : IDisposable
     {
         if (_disposed) return;
 
-        // GPU 网格/材质由渲染器（Renderer）统一释放；
-        // 场景本身只持有数据引用，此处仅清理节点列表。
+        // GPU meshes/materials are released by the renderer (Renderer); the scene only holds data
+        // references, so here we just clear the node lists.
         _roots.Clear();
         _lights.Clear();
         _disposed = true;

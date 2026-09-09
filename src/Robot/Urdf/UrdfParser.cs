@@ -10,30 +10,29 @@ using RobotSimulation.Robot.Description;
 namespace RobotSimulation.Robot.Urdf;
 
 /// <summary>
-/// URDF 文本 → <see cref="RobotDescription"/> 的解析器（内部类型）。
-/// 通过 <see cref="RobotModel"/> 门面使用。
+/// URDF text → <see cref="RobotDescription"/> parser (internal type). Used via the <see cref="RobotModel"/> facade.
 ///
-/// 职责与范围：
-///  - 只覆盖可视化：robot / link / visual / geometry / material / joint（拓扑）；
-///  - 忽略 inertial / collision / transmission / gazebo 等物理与扩展内容；
-///  - 位姿统一合成为行主序矩阵（与 Core.Scene.Transform 约定一致）；
-///  - 数值一律 InvariantCulture 解析（URDF 小数点恒为 '.'）。
+/// Responsibility and scope:
+///  - Visualization only: robot / link / visual / geometry / material / joint (topology);
+///  - Ignores physical and extension content such as inertial / collision / transmission / gazebo;
+///  - Poses are unified into row-major matrices (consistent with Core.Scene.Transform);
+///  - All numbers are parsed InvariantCulture (URDF decimal point is always '.').
 /// </summary>
 internal sealed class UrdfParser
 {
     private static readonly char[] Whitespace = { ' ', '\t', '\r', '\n' };
 
     /// <summary>
-    /// 解析 XML 文档。不访问磁盘。
+    /// Parses an XML document. Does not access the disk.
     /// </summary>
     public RobotDescription Parse(XDocument document, string? baseDirectory = null)
     {
         XElement? root = document.Root;
         if (root is null)
-            throw new UrdfParseException("URDF 文档为空（无根元素）。");
+            throw new UrdfParseException("URDF document is empty (no root element).");
         if (root.Name.LocalName != "robot")
             throw new UrdfParseException(
-                $"URDF 根元素应为 &lt;robot&gt;，实际为 &lt;{root.Name.LocalName}&gt;。");
+                $"URDF root element should be &lt;robot&gt;, but is &lt;{root.Name.LocalName}&gt;.");
 
         var robot = new RobotDescription
         {
@@ -41,12 +40,12 @@ internal sealed class UrdfParser
             SourceBaseDirectory = baseDirectory,
         };
 
-        // 第一遍：注册 robot 级材质定义（material name → 定义）
+        // First pass: register robot-level material definitions (material name → definition).
         var materials = new Dictionary<string, MaterialElement>(StringComparer.Ordinal);
         foreach (XElement materialElement in Children(root, "material"))
             RegisterMaterial(materialElement, materials);
 
-        // 第二遍：解析 link / joint；未知元素（gazebo 等扩展）一律忽略以向前兼容
+        // Second pass: parse link / joint; unknown elements (e.g. gazebo extensions) are ignored for forward compatibility.
         foreach (XElement element in root.Elements())
         {
             switch (element.Name.LocalName)
@@ -62,10 +61,10 @@ internal sealed class UrdfParser
                 case "material":
                 case "gazebo":
                 case "transmission":
-                    break; // 已在第一遍处理，或明确忽略
+                    break; // Already handled in the first pass, or explicitly ignored.
 
                 default:
-                    break; // 忽略未知元素
+                    break; // Ignore unknown elements.
             }
         }
 
@@ -84,7 +83,7 @@ internal sealed class UrdfParser
         foreach (XElement visual in Children(element, "visual"))
             link.VisualElements.Add(ParseVisual(visual, materials));
 
-        // inertial / collision 明确忽略（本层只管可视化）
+        // inertial / collision are explicitly ignored (this layer only handles visualization).
         return link;
     }
 
@@ -93,7 +92,7 @@ internal sealed class UrdfParser
         XElement? geometryElement = Child(element, "geometry");
         if (geometryElement is null)
             throw new UrdfParseException(
-                $"link 的 &lt;visual&gt; 缺少 &lt;geometry&gt;（位于 link '{element.Parent?.Attribute("name")?.Value}'）。");
+                $"link's &lt;visual&gt; lacks &lt;geometry&gt; (in link '{element.Parent?.Attribute("name")?.Value}').");
 
         var visual = new VisualElement
         {
@@ -106,9 +105,9 @@ internal sealed class UrdfParser
     }
 
     /// <summary>
-    /// 解析 visual 材质。返回：
-    ///  - 内嵌完整定义（含 color/texture）→ 构造并注册（同名覆盖）；
-    ///  - 仅按 name 引用 → 查已注册定义，缺失则告警并返回 null（渲染用默认外观）。
+    /// Parses a visual material. Returns:
+    ///  - An inline full definition (with color/texture) → construct and register (later same-name overrides);
+    ///  - A name-only reference → look up the registered definition, warn and return null on a miss (render uses default appearance).
     /// </summary>
     private static MaterialElement? ParseVisualMaterial(
         XElement? element, Dictionary<string, MaterialElement> materials)
@@ -123,17 +122,17 @@ internal sealed class UrdfParser
         if (!hasInlineDefinition)
         {
             if (name is null)
-                return null; // 无名字也无内容，等价于没有材质
+                return null; // No name and no content: equivalent to no material.
             if (materials.TryGetValue(name, out MaterialElement? existing))
                 return existing;
 
-            Logger.Warning($"visual 引用了未定义的材质 '{name}'，将使用默认外观。");
+            Logger.Warning($"visual references an undefined material '{name}'; using default appearance.");
             return null;
         }
 
         MaterialElement material = BuildMaterial(name, element);
         if (name is not null)
-            materials[name] = material; // 同名后者覆盖
+            materials[name] = material; // A later same-name definition overrides.
         return material;
     }
 
@@ -145,7 +144,7 @@ internal sealed class UrdfParser
 
         bool hasDefinition = element.Elements().Any(e => e.Name.LocalName == "color" || e.Name.LocalName == "texture");
         if (!hasDefinition)
-            return; // 纯占位引用，由后续定义注册
+            return; // A pure placeholder reference, registered by a later definition.
 
         materials[name] = BuildMaterial(name, element);
     }
@@ -174,7 +173,7 @@ internal sealed class UrdfParser
     {
         XElement? shape = element.Elements().FirstOrDefault();
         if (shape is null)
-            throw new UrdfParseException("&lt;geometry&gt; 内缺少几何子元素（box/sphere/cylinder/capsule/mesh）。");
+            throw new UrdfParseException("&lt;geometry&gt; lacks a geometry child element (box/sphere/cylinder/capsule/mesh).");
 
         switch (shape.Name.LocalName)
         {
@@ -197,7 +196,7 @@ internal sealed class UrdfParser
             }
 
             default:
-                throw new UrdfParseException($"不支持或未知的几何类型 &lt;{shape.Name.LocalName}&gt;。");
+                throw new UrdfParseException($"Unsupported or unknown geometry type &lt;{shape.Name.LocalName}&gt;.");
         }
     }
 
@@ -232,11 +231,11 @@ internal sealed class UrdfParser
             case "floating":
             case "planar":
                 throw new UrdfParseException(
-                    $"joint '{element.Attribute("name")?.Value}' 的类型 '{raw}' 不受支持" +
-                    "（本层仅可视化，可驱动关节限定为 fixed/revolute/continuous/prismatic）。");
+                    $"joint '{element.Attribute("name")?.Value}' has unsupported type '{raw}'" +
+                    "(this layer is visualization-only; drivable joints are limited to fixed/revolute/continuous/prismatic).");
             default:
                 throw new UrdfParseException(
-                    $"joint '{element.Attribute("name")?.Value}' 的类型 '{raw}' 未知。");
+                    $"joint '{element.Attribute("name")?.Value}' has unknown type '{raw}'.");
         }
     }
 
@@ -245,24 +244,24 @@ internal sealed class UrdfParser
         XElement? child = Child(jointElement, childTag);
         if (child is null)
             throw new UrdfParseException(
-                $"joint '{jointElement.Attribute("name")?.Value}' 缺少 &lt;{childTag} link=\"...\"&gt;。");
+                $"joint '{jointElement.Attribute("name")?.Value}' lacks &lt;{childTag} link=\"...\"&gt;.");
         return RequiredAttribute(child, "link");
     }
 
     // ------------------------------------------------------------------
-    // 通用数值 / 属性读取
+    // Generic number / attribute reading
     // ------------------------------------------------------------------
 
     private static Vector3 ParseAxis(XElement? element)
     {
-        // URDF 规范：axis 缺省为 (1,0,0)。描述层默认 UnitX 与此一致。
+        // URDF spec: axis defaults to (1,0,0). The description-layer default UnitX matches this.
         if (element is null)
             return Vector3.UnitX;
 
         Vector3 axis = ReadVector3(element, "xyz");
         float lengthSquared = axis.LengthSquared();
         if (lengthSquared < 1e-12f)
-            throw new UrdfParseException("&lt;axis&gt; 的长度为 0，无法确定旋转/平移方向。");
+            throw new UrdfParseException("&lt;axis&gt; has length 0, so no rotation/translation direction can be determined.");
         return Vector3.Normalize(axis);
     }
 
@@ -279,16 +278,16 @@ internal sealed class UrdfParser
             ? Vector3.Zero
             : ReadVector3(element, "rpy");
 
-        // URDF origin 为固定轴 XYZ：先绕世界 X 转 roll，再绕世界 Y 转 pitch，最后绕世界 Z 转 yaw，
-        // 即四元数合成 q = qZ(yaw) * qY(pitch) * qX(roll)（应用顺序：roll → pitch → yaw）。
-        // 注意：不能使用 Quaternion.CreateFromYawPitchRoll —— 其参数轴约定与 URDF 不一致
-        // （实测会把 roll 误当成绕 Z 旋转），这里逐轴显式构造。
+        // URDF origin is fixed-axis XYZ: rotate roll about world X, then pitch about world Y, then yaw
+        // about world Z — i.e. quaternion composition q = qZ(yaw) * qY(pitch) * qX(roll) (order: roll → pitch → yaw).
+        // Note: do not use Quaternion.CreateFromYawPitchRoll — its axis convention differs from URDF (in
+        // practice it mistakenly treats roll as a rotation about Z); construct each axis explicitly here.
         var rotation = Matrix4x4.CreateFromQuaternion(
             Quaternion.CreateFromAxisAngle(Vector3.UnitZ, rpy.Z)
             * Quaternion.CreateFromAxisAngle(Vector3.UnitY, rpy.Y)
             * Quaternion.CreateFromAxisAngle(Vector3.UnitX, rpy.X));
 
-        // 行主序约定：与 Core.Scene.Transform 一致，先旋转后平移。
+        // Row-major convention: consistent with Core.Scene.Transform, rotate then translate.
         return rotation * Matrix4x4.CreateTranslation(xyz);
     }
 
@@ -308,7 +307,7 @@ internal sealed class UrdfParser
 
         string[] parts = raw.Split(Whitespace, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 3)
-            throw InvalidValue(element, attributeName, raw, "需要 3 个空格分隔的数值（x y z）");
+            throw InvalidValue(element, attributeName, raw, "requires 3 space-separated numbers (x y z)");
 
         return new Vector3(
             ParseSingle(parts[0], element, attributeName),
@@ -324,7 +323,7 @@ internal sealed class UrdfParser
 
         string[] parts = raw.Split(Whitespace, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 4)
-            throw InvalidValue(element, attributeName, raw, "需要 4 个空格分隔的数值（r g b a）");
+            throw InvalidValue(element, attributeName, raw, "requires 4 space-separated numbers (r g b a)");
 
         return new Vector4(
             ParseSingle(parts[0], element, attributeName),
@@ -336,7 +335,7 @@ internal sealed class UrdfParser
     private static float ParseSingle(string text, XElement element, string attributeName)
     {
         if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
-            throw InvalidValue(element, attributeName, text, "非法数值");
+            throw InvalidValue(element, attributeName, text, "invalid number");
         return value;
     }
 
@@ -350,14 +349,14 @@ internal sealed class UrdfParser
 
     private static UrdfParseException MissingAttribute(XElement element, string attributeName)
         => new UrdfParseException(
-            $"元素 &lt;{element.Name.LocalName}&gt; 缺少必选属性 '{attributeName}'。");
+            $"element &lt;{element.Name.LocalName}&gt; lacks the required attribute '{attributeName}'.");
 
     private static UrdfParseException InvalidValue(XElement element, string attributeName, string raw, string reason)
         => new UrdfParseException(
-            $"元素 &lt;{element.Name.LocalName}&gt; 的属性 '{attributeName}' 的值 '{raw}' 非法：{reason}。");
+            $"element &lt;{element.Name.LocalName}&gt; attribute '{attributeName}' has invalid value '{raw}': {reason}.");
 
     // ------------------------------------------------------------------
-    // 元素遍历辅助（按 LocalName，容忍命名空间/前缀）
+    // Element traversal helpers (by LocalName, tolerant of namespace/prefix)
     // ------------------------------------------------------------------
 
     private static IEnumerable<XElement> Children(XElement element, string localName)
@@ -367,7 +366,7 @@ internal sealed class UrdfParser
         => element.Elements().FirstOrDefault(e => e.Name.LocalName == localName);
 
     // ------------------------------------------------------------------
-    // 拓扑校验
+    // Topology validation
     // ------------------------------------------------------------------
 
     private static void Validate(RobotDescription robot)
@@ -376,7 +375,7 @@ internal sealed class UrdfParser
         foreach (Link link in robot.Links)
         {
             if (!linkNames.Add(link.Name))
-                throw new UrdfParseException($"重复的 link 名称 '{link.Name}'。");
+                throw new UrdfParseException($"Duplicate link name '{link.Name}'.");
         }
 
         var jointNames = new HashSet<string>(StringComparer.Ordinal);
@@ -384,20 +383,20 @@ internal sealed class UrdfParser
         foreach (Joint joint in robot.Joints)
         {
             if (!jointNames.Add(joint.Name))
-                throw new UrdfParseException($"重复的 joint 名称 '{joint.Name}'。");
+                throw new UrdfParseException($"Duplicate joint name '{joint.Name}'.");
             if (!linkNames.Contains(joint.ParentLinkName))
                 throw new UrdfParseException(
-                    $"joint '{joint.Name}' 的父 link '{joint.ParentLinkName}' 不存在。");
+                    $"joint '{joint.Name}' parent link '{joint.ParentLinkName}' does not exist.");
             if (!linkNames.Contains(joint.ChildLinkName))
                 throw new UrdfParseException(
-                    $"joint '{joint.Name}' 的子 link '{joint.ChildLinkName}' 不存在。");
+                    $"joint '{joint.Name}' child link '{joint.ChildLinkName}' does not exist.");
             if (parentByChildLink.ContainsKey(joint.ChildLinkName))
                 throw new UrdfParseException(
-                    $"link '{joint.ChildLinkName}' 被多个 joint 作为子 link——URDF 必须是树。");
+                    $"link '{joint.ChildLinkName}' is the child of multiple joints — URDF must be a tree.");
             parentByChildLink[joint.ChildLinkName] = joint.ParentLinkName;
         }
 
-        // 环检测：沿"子 → 父"链向上走，途经重复节点即成环
+        // Cycle detection: walk the "child → parent" chain upward; a repeated node along the way is a cycle.
         foreach (string linkName in linkNames)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -406,7 +405,7 @@ internal sealed class UrdfParser
             {
                 if (!visited.Add(current))
                     throw new UrdfParseException(
-                        $"joint 拓扑成环：链路中重复经过 link '{current}'。");
+                        $"Joint topology has a cycle: link '{current}' was revisited in the chain.");
                 current = parent;
             }
         }

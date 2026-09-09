@@ -11,27 +11,27 @@ public static class MathUtils
     public const float RadToDeg = 180f / Pi;
 
     /// <summary>
-    /// 角度转弧度
+    /// Converts degrees to radians.
     /// </summary>
     public static float DegreesToRadians(float degrees) => degrees * DegToRad;
 
     /// <summary>
-    /// 弧度转角度
+    /// Converts radians to degrees.
     /// </summary>
     public static float RadiansToDegrees(float radians) => radians * RadToDeg;
 
     /// <summary>
-    /// 钳制数值到指定范围
+    /// Clamps a value to the given range.
     /// </summary>
     public static float Clamp(float value, float min, float max) => Math.Clamp(value, min, max);
 
     /// <summary>
-    /// 线性插值
+    /// Linear interpolation.
     /// </summary>
     public static float Lerp(float a, float b, float t) => a + (b - a) * t;
 
     /// <summary>
-    /// 将角度归一化到 [-180, 180] 范围
+    /// Normalizes an angle to the [-180, 180] range.
     /// </summary>
     public static float NormalizeAngle(float degrees)
     {

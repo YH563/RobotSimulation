@@ -3,18 +3,19 @@ using System.Numerics;
 namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// 轴对齐包围盒（AABB），用最小/最大角点表示。网格局部坐标、相机等都以世界 Z 向上为单位，
-/// Bounds 只描述"一个长方体区域"，不含坐标系语义，供射线粗筛与命中查询使用。
+/// Axis-aligned bounding box (AABB), expressed by its min/max corners. Mesh-local
+/// coordinates, cameras, etc. use world Z-up. Bounds only describes "a box region",
+/// with no coordinate-system semantics; used for ray broad-phase and hit queries.
 /// </summary>
 public readonly struct Bounds
 {
     public Vector3 Min { get; }
     public Vector3 Max { get; }
 
-    /// <summary>包围盒中心。</summary>
+    /// <summary>Center of the box.</summary>
     public Vector3 Center => (Min + Max) * 0.5f;
 
-    /// <summary>包围盒尺寸（Max - Min）。</summary>
+    /// <summary>Size of the box (Max - Min).</summary>
     public Vector3 Size => Max - Min;
 
     public Bounds(Vector3 min, Vector3 max)
@@ -23,7 +24,7 @@ public readonly struct Bounds
         Max = max;
     }
 
-    /// <summary>由一组点计算包围盒；当 <paramref name="points"/> 为空时返回一个空盒（Min = Max = 0）。</summary>
+    /// <summary>Computes a bounding box from a set of points; returns an empty box (Min = Max = 0) when <paramref name="points"/> is empty.</summary>
     public static Bounds FromPoints(System.Collections.Generic.IEnumerable<Vector3> points)
     {
         var enumerator = points.GetEnumerator();

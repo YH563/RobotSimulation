@@ -4,12 +4,13 @@ using System.Numerics;
 namespace RobotSimulation.Core.Geometry;
 
 /// <summary>
-/// 纯几何射线求交原语（不引用场景/渲染类型）。所有方法假设 <see cref="Ray.Direction"/> 已归一化，
-/// 因此返回的距离即世界单位距离，可直接跨对象比较。用于拾取的粗筛与精确命中。
+/// Pure geometric ray-intersection primitives (no scene/rendering types). All methods assume
+/// <see cref="Ray.Direction"/> is normalized, so the returned distances are world-unit distances
+/// and can be compared across objects. Used for picking broad-phase and exact hits.
 /// </summary>
 public static class Raycast
 {
-    /// <summary>射线与球求交；返回最近的正向距离；未命中返回 null。</summary>
+    /// <summary>Ray vs. sphere; returns the nearest positive distance, or null on a miss.</summary>
     public static float? HitSphere(in Ray ray, Vector3 center, float radius)
     {
         Vector3 oc = ray.Origin - center;
@@ -26,7 +27,7 @@ public static class Raycast
         return t < 0f ? null : t;
     }
 
-    /// <summary>射线与无限平面求交；返回正向距离；平行或在射线后方返回 null。</summary>
+    /// <summary>Ray vs. infinite plane; returns the positive distance, or null when parallel or behind the ray.</summary>
     public static float? HitPlane(in Ray ray, Vector3 point, Vector3 normal)
     {
         float denom = Vector3.Dot(ray.Direction, normal);
@@ -38,8 +39,9 @@ public static class Raycast
     }
 
     /// <summary>
-    /// 射线与轴对齐包围盒求交（slab 法）；返回进入距离（起点在盒内时为负值，仍视为命中）；
-    /// 未命中返回 null。用于拾取前的粗筛。
+    /// Ray vs. axis-aligned bounding box (slab method); returns the entry distance (negative when
+    /// the origin is inside the box, still a hit); returns null on a miss. Used as a broad-phase
+    /// check before picking.
     /// </summary>
     public static float? HitAABB(in Ray ray, in Bounds bounds)
     {
@@ -56,7 +58,7 @@ public static class Raycast
     private static bool AdvanceSlab(float o, float d, float min, float max, ref float tmin, ref float tmax)
     {
         if (MathF.Abs(d) < 1e-9f)
-            return o >= min && o <= max;   // 平行于该轴：仅在包围该轴的厚度内才可能命中
+            return o >= min && o <= max;   // Parallel to this axis: only hit if within the slab thickness.
 
         float t1 = (min - o) / d;
         float t2 = (max - o) / d;
@@ -68,8 +70,9 @@ public static class Raycast
     }
 
     /// <summary>
-    /// 射线与三角形求交（Möller–Trumbore，双面命中：正面与背面都可命中，法线朝向射线来向）。
-    /// 返回是否命中，并输出沿射线的距离、世界法线及命中点的重心坐标 (u, v)。
+    /// Ray vs. triangle (Möller–Trumbore, double-sided: both front and back faces can be hit,
+    /// with the normal facing the ray). Returns whether it hit, and outputs the distance along the
+    /// ray, the world normal, and the barycentric coordinates (u, v) of the hit point.
     /// </summary>
     public static bool HitTriangle(in Ray ray, Vector3 a, Vector3 b, Vector3 c,
         out float distance, out Vector3 normal, out float u, out float v)
@@ -105,7 +108,7 @@ public static class Raycast
         distance = t;
         normal = Vector3.Cross(e1, e2);
         if (det < 0f)
-            normal = -normal;   // 背面命中：翻转法线使其朝向射线来向
+            normal = -normal;   // Back-face hit: flip so the normal faces the ray.
         normal = normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitZ;
         return true;
     }

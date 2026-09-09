@@ -17,10 +17,12 @@ public class Transform
     private Vector3 _scale = Vector3.One;
 
     /// <summary>
-    /// 本变换是否只读。true 时 <see cref="Position"/> / <see cref="Rotation"/> / <see cref="Scale"/>
-    /// 的 setter 会抛出 <see cref="InvalidOperationException"/>；框架/系统内部（如机器人关节驱动、
-    /// 位姿装配）应使用 <see cref="SetLocalPose"/> 绕过只读保护。
-    /// 用于保证"派生量"（如机器人 link 的局部位姿）只能经宿主对象的官方接口修改，禁止外部直接改写。
+    /// Whether this transform is read-only. When true, the setters of <see cref="Position"/> /
+    /// <see cref="Rotation"/> / <see cref="Scale"/> throw <see cref="InvalidOperationException"/>;
+    /// framework/system internals (such as robot joint driving and pose assembly) should use
+    /// <see cref="SetLocalPose"/> to bypass the read-only protection. This guarantees that "derived"
+    /// quantities (such as a robot link's local pose) can only be changed through the host object's
+    /// official interface, forbidding external direct rewrites.
     /// </summary>
     public bool IsReadOnly { get; private set; }
 
@@ -54,13 +56,14 @@ public class Transform
         }
     }
 
-    /// <summary>设置只读标志（框架级 API，仅 <c>RobotSimulation.Robot</c> 程序集内部可用；机器人构建完成后整树锁定）。</summary>
+    /// <summary>Sets the read-only flag (framework-level API, internal to <c>RobotSimulation.Robot</c>; the whole tree is locked after robot construction).</summary>
     internal void SetReadOnly(bool value) => IsReadOnly = value;
 
     /// <summary>
-    /// 框架/系统级"直接写入"入口：无视 <see cref="IsReadOnly"/>，一次性设置位置/旋转/缩放。
-    /// 仅 <c>RobotSimulation.Robot</c> 程序集内部（<c>RobotModel.SetJointValue</c>/<c>RootPose</c>）可用，
-    /// 外部代码无论经 <see cref="Children"/> 还是 <see cref="Owner"/> 都无法调用，子 link 的位姿无法被外部改写。
+    /// Framework/system-level "direct write" entry: ignores <see cref="IsReadOnly"/> and sets
+    /// position/rotation/scale at once. Only available internally to <c>RobotSimulation.Robot</c>
+    /// (<c>RobotModel.SetJointValue</c>/<c>RootPose</c>); external code cannot call it via
+    /// <see cref="Children"/> or <see cref="Owner"/>, so child-link poses cannot be rewritten externally.
     /// </summary>
     internal void SetLocalPose(Vector3 position, Quaternion rotation, Vector3 scale)
     {
@@ -73,7 +76,7 @@ public class Transform
     {
         if (IsReadOnly)
             throw new InvalidOperationException(
-                $"Transform '{Owner?.Name}' 的 {property} 为只读（属于受保护子树，请通过宿主对象的内置接口修改）。");
+                $"Transform '{Owner?.Name}' property '{property}' is read-only (it belongs to a protected subtree; modify it through the host object's built-in interface).");
     }
 
     private Transform? _parent;
@@ -110,17 +113,17 @@ public class Transform
     }
 
     /// <summary>
-    /// 世界矩阵的逆矩阵（模型矩阵不可逆时返回 <see cref="Matrix4x4.Identity"/>）。
-    /// 用于把世界坐标/方向变换回局部（如拾取）。
+    /// Inverse of the world matrix (returns <see cref="Matrix4x4.Identity"/> when the model matrix is not invertible).
+    /// Used to transform world coordinates/directions back to local (e.g. picking).
     /// </summary>
     public Matrix4x4 GetWorldInverseMatrix()
         => Matrix4x4.Invert(GetModelMatrix(), out var inv) ? inv : Matrix4x4.Identity;
 
-    /// <summary>把世界坐标点变换到本节点局部坐标。</summary>
+    /// <summary>Transforms a world-space point into this node's local space.</summary>
     public Vector3 WorldToLocal(Vector3 worldPoint)
         => Vector3.Transform(worldPoint, GetWorldInverseMatrix());
 
-    /// <summary>把本节点局部坐标点变换到世界坐标。</summary>
+    /// <summary>Transforms a local-space point into world space.</summary>
     public Vector3 LocalToWorld(Vector3 localPoint)
         => Vector3.Transform(localPoint, GetModelMatrix());
 }

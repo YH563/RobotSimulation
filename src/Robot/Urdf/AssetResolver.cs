@@ -5,39 +5,40 @@ using RobotSimulation.Core.Utils;
 namespace RobotSimulation.Robot.Urdf;
 
 /// <summary>
-/// 资源定位扩展点：把 URDF 中 mesh/texture 等引用串解析为可访问的绝对路径。
-/// 描述层不消费它——由 <see cref="RobotModel"/> 在构建机器人树（材质/mesh 载入）时调用。
-/// 默认实现见 <see cref="FileSystemAssetResolver"/>。
+/// Asset-location extension point: resolves URDF mesh/texture reference strings into accessible absolute
+/// paths. The description layer does not consume it — <see cref="RobotModel"/> calls it when building the
+/// robot tree (material/mesh loading). The default implementation is <see cref="FileSystemAssetResolver"/>.
 /// </summary>
 public interface IAssetResolver
 {
     /// <summary>
-    /// 解析资源引用。
+    /// Resolves an asset reference.
     /// </summary>
-    /// <param name="uri">URDF 中的原始引用串（绝对/相对路径或 package:// 形式）。</param>
-    /// <param name="baseDirectory">URDF 文件所在目录（可为 null，此时 package:// 无法按同级解析）。</param>
-    /// <returns>可访问的绝对路径。</returns>
-    /// <exception cref="IOException">默认实现找不到资源时抛出（文件不存在），交由调用方/用户处理 URDF 路径问题。</exception>
+    /// <param name="uri">The raw reference string from the URDF (absolute/relative path or package:// form).</param>
+    /// <param name="baseDirectory">The directory of the URDF file (may be null, in which case package:// cannot resolve relative to it).</param>
+    /// <returns>An accessible absolute path.</returns>
+    /// <exception cref="IOException">The default implementation throws when the resource is missing (file not found), leaving URDF path issues to the caller/user.</exception>
     string? Resolve(string uri, string? baseDirectory);
 }
 
 /// <summary>
-/// 默认文件系统实现（规则简单、报错直接，便于用户自查 URDF）：
+/// Default filesystem implementation (simple rules, direct errors to help the user check their URDF):
 /// <list type="bullet">
-///   <item>绝对路径：按绝对路径定位。</item>
-///   <item>相对路径：以 URDF 文件所在目录（baseDirectory）为基准合并。</item>
-///   <item><c>package://包名/相对路径</c>：剥掉包名前缀，把剩余相对路径在 URDF 同级目录下查找
-///   （即以"URDF 文件旁是否存在该相对路径"为 package 定位规则）。</item>
+///   <item>Absolute path: located as an absolute path.</item>
+///   <item>Relative path: combined relative to the URDF file's directory (baseDirectory).</item>
+///   <item><c>package://package-name/relative-path</c>: strips the package prefix and looks for the
+///   remaining relative path next to the URDF file (treating "next to the URDF" as the package root).</item>
 /// </list>
-/// 定位到目标后仍做存在性校验：文件不存在直接 <see cref="FileNotFoundException"/> 报错，
-/// 让用户自行修正 URDF 里的 filename 或资源布局——不做静默跳过。
+/// After resolving, it still checks existence: if the file is missing it throws
+/// <see cref="FileNotFoundException"/> directly so the user fixes the URDF filename or asset layout — no
+/// silent skipping.
 /// </summary>
 public sealed class FileSystemAssetResolver : IAssetResolver
 {
     public string? Resolve(string uri, string? baseDirectory)
     {
         if (string.IsNullOrWhiteSpace(uri))
-            throw new ArgumentException("资源引用串不能为空。", nameof(uri));
+            throw new ArgumentException("Asset reference string cannot be empty.", nameof(uri));
 
         string candidate;
         if (uri.StartsWith("package://", StringComparison.OrdinalIgnoreCase))
@@ -60,29 +61,29 @@ public sealed class FileSystemAssetResolver : IAssetResolver
         }
 
         string hint = Path.GetDirectoryName(candidate) is { } dir && !string.IsNullOrEmpty(dir)
-            ? $"（期望目录：{dir}）"
+            ? $" (expected directory: {dir})"
             : string.Empty;
         Logger.Error(
-            $"URDF 资源不存在：{candidate}（原始引用：{uri}）{hint}。" +
-            "请检查 URDF 的 mesh/texture filename，或将资源放到对应目录后重试。");
+            $"URDF asset not found: {candidate} (original reference: {uri}){hint}. " +
+            "Check the mesh/texture filename in the URDF, or move the asset to the corresponding directory and retry.");
         throw new FileNotFoundException(
-            $"URDF 资源不存在：{candidate}（原始引用：{uri}）。" +
-            "请检查 URDF 的 mesh/texture filename 或资源布局。", candidate);
+            $"URDF asset not found: {candidate} (original reference: {uri}). " +
+            "Check the mesh/texture filename in the URDF or the asset layout.", candidate);
     }
 
-    /// <summary>package://包名/rest → URDF 同级目录下的 rest（以 URDF 文件旁为 package 根）。</summary>
+    /// <summary>package://package-name/rest → rest next to the URDF (using "next to the URDF file" as the package root).</summary>
     private static string ResolvePackageUri(string uri, string? baseDirectory)
     {
         const string prefix = "package://";
         int restStart = uri.IndexOf('/', prefix.Length);
         if (restStart < 0)
             throw new FileNotFoundException(
-                $"package:// 引用缺少路径：{uri}。URDF 中 mesh filename 应为 package://包名/相对路径 形式。", uri);
+                $"package:// reference lacks a path: {uri}. The URDF mesh filename should be of the form package://package-name/relative/path.", uri);
 
         string relative = uri[(restStart + 1)..];
         if (string.IsNullOrEmpty(baseDirectory))
             throw new FileNotFoundException(
-                $"package:// 引用（{uri}）无法解析：缺少 URDF 文件所在目录（baseDirectory）。", uri);
+                $"package:// reference ({uri}) cannot be resolved: the URDF file directory (baseDirectory) is missing.", uri);
 
         return Path.Combine(baseDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
     }
@@ -92,4 +93,3 @@ public sealed class FileSystemAssetResolver : IAssetResolver
             ? Path.GetFullPath(relative)
             : Path.GetFullPath(Path.Combine(baseDirectory, relative));
 }
-

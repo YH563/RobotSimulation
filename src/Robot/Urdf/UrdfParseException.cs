@@ -1,7 +1,8 @@
 namespace RobotSimulation.Robot.Urdf;
 
 /// <summary>
-/// URDF 解析失败时抛出，消息尽量包含元素/属性上下文以便定位问题文件。
+/// Thrown when URDF parsing fails; the message includes element/attribute context where possible to
+/// help locate the offending file.
 /// </summary>
 public sealed class UrdfParseException : Exception
 {

@@ -5,18 +5,20 @@ using RobotSimulation.Core.Utils;
 namespace RobotSimulation.Core.Geometry.Import;
 
 /// <summary>
-/// Assimp 原生运行环境准备。AssimpNet 4.1 在 Linux 下需要可加载的 libdl.so，
-/// 而某些发行版只提供 libdl.so.2 —— 这里在输出目录补一个软链接。
-/// 任何使用 <see cref="AssimpModelLoader"/> 导入 mesh 之前，程序入口应调用一次
-/// <see cref="EnsureRuntime"/>（Windows/macOS 为空操作）。本类不随库自动执行，
-/// 由宿主/工具的组装根显式触发，保持 Core 库本身无环境引导副作用。
+/// Assimp native runtime preparation. AssimpNet 4.1 needs a loadable libdl.so on Linux, but some
+/// distributions only ship libdl.so.2 — this adds a soft link in the output directory. Any entry
+/// point that uses <see cref="AssimpModelLoader"/> to import a mesh should call
+/// <see cref="EnsureRuntime"/> once first (a no-op on Windows/macOS). This class is not run
+/// automatically by the library; the host/tool composition root triggers it explicitly, keeping the
+/// Core library free of environment-bootstrap side effects.
 /// </summary>
 public static class AssimpNative
 {
     /// <summary>
-    /// 确保 Assimp 原生库可加载。Linux 上为 libdl 补兼容链接；其它平台恒返回 true。
+    /// Ensures the Assimp native library can load. On Linux this adds a compatibility link for libdl;
+    /// on other platforms it always returns true.
     /// </summary>
-    /// <returns>true = 已就绪（无需/成功）；false = 找不到系统 libdl，导入可能失败。</returns>
+    /// <returns>true = ready (no action needed / succeeded); false = system libdl not found, import may fail.</returns>
     public static bool EnsureRuntime()
     {
         if (!OperatingSystem.IsLinux())
@@ -32,7 +34,7 @@ public static class AssimpNative
 
         if (real is null)
         {
-            Logger.Warning("找不到系统 libdl.so.2，Assimp 模型导入可能不可用。");
+            Logger.Warning("System libdl.so.2 not found; Assimp model import may be unavailable.");
             return false;
         }
 
@@ -49,11 +51,11 @@ public static class AssimpNative
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.CreateSymbolicLink(target, real);
-                Logger.Info($"为 Assimp 创建兼容链接：{target}");
+                Logger.Info($"Created compatibility link for Assimp: {target}");
             }
             catch (Exception ex)
             {
-                Logger.Error($"无法创建符号链接 {target}：{ex.Message}");
+                Logger.Error($"Failed to create symbolic link {target}: {ex.Message}");
             }
         }
 

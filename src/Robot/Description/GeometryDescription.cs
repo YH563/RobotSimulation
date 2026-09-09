@@ -3,44 +3,44 @@ using System.Numerics;
 namespace RobotSimulation.Robot.Description;
 
 /// <summary>
-/// 几何体抽象基类（record 多态联合类型）。
-/// 仅描述"形状参数"，不含位姿——位姿由 <see cref="VisualElement"/> 持有。
-/// 尺寸单位：米；图元回转轴沿 +Z（URDF/ROS 语义）。
+/// Abstract base for geometry (a polymorphic record union type).
+/// Describes only the "shape parameters", not the pose — the pose is held by <see cref="VisualElement"/>.
+/// Units are meters; primitive revolution axes are +Z (URDF/ROS semantics).
 /// </summary>
 public abstract record GeometryElement;
 
 /// <summary>
-/// 长方体几何。↔ URDF &lt;box&gt;
+/// Box geometry. ↔ URDF &lt;box&gt;
 /// </summary>
-/// <param name="Size">x/y/z 三个方向的全宽（即 URDF size 的三个分量）。</param>
+/// <param name="Size">Full widths along x/y/z (the three components of the URDF size).</param>
 public sealed record BoxGeometry(Vector3 Size) : GeometryElement;
 
 /// <summary>
-/// 球体几何。↔ URDF &lt;sphere&gt;
+/// Sphere geometry. ↔ URDF &lt;sphere&gt;
 /// </summary>
-/// <param name="Radius">半径（米）。</param>
+/// <param name="Radius">Radius (meters).</param>
 public sealed record SphereGeometry(float Radius) : GeometryElement;
 
 /// <summary>
-/// 圆柱几何，回转轴沿局部 +Z。↔ URDF &lt;cylinder&gt;
+/// Cylinder geometry, revolution axis along local +Z. ↔ URDF &lt;cylinder&gt;
 /// </summary>
-/// <param name="Radius">半径（米）。</param>
-/// <param name="Length">圆柱高度（沿 Z，米）。</param>
+/// <param name="Radius">Radius (meters).</param>
+/// <param name="Length">Cylinder height (along Z, meters).</param>
 public sealed record CylinderGeometry(float Radius, float Length) : GeometryElement;
 
 /// <summary>
-/// 胶囊几何，轴沿局部 +Z。↔ URDF &lt;capsule&gt;
+/// Capsule geometry, axis along local +Z. ↔ URDF &lt;capsule&gt;
 /// </summary>
-/// <param name="Radius">半径（米，含两端半球帽）。</param>
-/// <param name="Length">中间圆柱段长度（不含半球帽，米）；总高 = Length + 2 × Radius。</param>
+/// <param name="Radius">Radius (meters, including the hemispherical caps).</param>
+/// <param name="Length">Middle cylinder segment length (excluding caps, meters); total height = Length + 2 × Radius.</param>
 public sealed record CapsuleGeometry(float Radius, float Length) : GeometryElement;
 
 /// <summary>
-/// 网格模型引用。↔ URDF &lt;mesh&gt;
+/// Mesh model reference. ↔ URDF &lt;mesh&gt;
 /// </summary>
 /// <param name="Uri">
-/// URDF 中原始引用串（可为相对路径或 package:// 形式）。
-/// 本层只记录引用、不解析文件；由渲染/导入层经 IAssetResolver 解析后交给
-/// Core/Geometry/Import 生成 MeshData。
+/// The raw reference string in the URDF (a relative path or package:// form).
+/// This layer only records the reference and does not resolve files; the rendering/import layer resolves
+/// it via IAssetResolver and hands it to Core/Geometry/Import to generate MeshData.
 /// </param>
 public sealed record MeshGeometry(string Uri) : GeometryElement;

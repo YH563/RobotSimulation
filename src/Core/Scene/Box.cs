@@ -4,18 +4,18 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 长方体基础图元（<see cref="GameObject"/> 派生）：构造即生成本地坐标的轴对齐盒网格。
-/// 尺寸为 x/y/z 方向全宽（URDF &lt;box size&gt; 语义）；回转/轴不涉及。
+/// Box primitive (<see cref="GameObject"/> derived): constructs a local-space axis-aligned box mesh.
+/// The size is the full width along x/y/z (URDF &lt;box size&gt; semantics); no revolution/axis involved.
 /// </summary>
 public sealed class Box : GameObject
 {
-    /// <summary>X 方向全宽。</summary>
+    /// <summary>Full width along X.</summary>
     public float Width { get; }
 
-    /// <summary>Y 方向全宽。</summary>
+    /// <summary>Full width along Y.</summary>
     public float Height { get; }
 
-    /// <summary>Z 方向全宽。</summary>
+    /// <summary>Full width along Z.</summary>
     public float Depth { get; }
 
     public Box(float width, float height, float depth, string? name = null)

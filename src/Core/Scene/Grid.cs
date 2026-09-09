@@ -6,24 +6,25 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// rviz 风格网格地面（<see cref="GameObject"/>，线条通道）：位于 XY 平面（z = 0），
-/// 法线一侧向上；由 GL_LINES 线段组成，不参与光照。用于替换实心地面作为机器人参考平面。
+/// rviz-style grid floor (<see cref="GameObject"/>, Line pass): lies on the XY plane (z = 0) with the
+/// normal side up, made of GL_LINES and not lit. Used as a reference plane for robots instead of a
+/// solid floor.
 /// </summary>
 public sealed class Grid : GameObject
 {
-    /// <summary>单格边长（米）。</summary>
+    /// <summary>Cell edge length (meters).</summary>
     public float CellSize { get; }
 
-    /// <summary>中心往每个方向的格数（总跨度 = 2 × CellCount × CellSize）。</summary>
+    /// <summary>Cell count from the center in each direction (total span = 2 × CellCount × CellSize).</summary>
     public int CellCount { get; }
 
     public Grid(float cellSize = 1f, int cellCount = 10, Vector4? color = null, string? name = "Grid")
         : base(null, null, name ?? nameof(Grid))
     {
         if (cellSize <= 0f || float.IsNaN(cellSize) || float.IsInfinity(cellSize))
-            throw new ArgumentOutOfRangeException(nameof(cellSize), cellSize, "格边长必须为正的有限数值。");
+            throw new ArgumentOutOfRangeException(nameof(cellSize), cellSize, "Cell size must be a positive finite value.");
         if (cellCount < 1)
-            throw new ArgumentOutOfRangeException(nameof(cellCount), cellCount, "格数不能小于 1。");
+            throw new ArgumentOutOfRangeException(nameof(cellCount), cellCount, "Cell count cannot be less than 1.");
 
         CellSize = cellSize;
         CellCount = cellCount;
@@ -44,8 +45,8 @@ public sealed class Grid : GameObject
         for (int i = -cellCount; i <= cellCount; i++)
         {
             float t = i * cellSize;
-            lines.AddSegment(new Vector3(t, -half, 0f), new Vector3(t, half, 0f));  // 沿 Y 的网格线
-            lines.AddSegment(new Vector3(-half, t, 0f), new Vector3(half, t, 0f));  // 沿 X 的网格线
+            lines.AddSegment(new Vector3(t, -half, 0f), new Vector3(t, half, 0f));  // Grid line along Y.
+            lines.AddSegment(new Vector3(-half, t, 0f), new Vector3(half, t, 0f));  // Grid line along X.
         }
         return lines;
     }

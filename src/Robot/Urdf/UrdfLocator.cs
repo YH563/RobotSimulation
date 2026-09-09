@@ -5,24 +5,26 @@ using System.Linq;
 namespace RobotSimulation.Robot.Urdf;
 
 /// <summary>
-/// URDF 文件定位：从命令行参数或默认资产目录中找出要加载的 .urdf。
-/// 与 <see cref="IAssetResolver"/>（mesh/texture 引用解析）分工不同——
-/// 这里管的是"整个 URDF 文件在哪"，那里管的是"URDF 内部引用的资源在哪"。
-/// 由宿主组装根调用，判断是否值得加载机器人。
+/// Locates URDF files: finds the .urdf to load from a CLI argument or the default asset directory.
+/// This is distinct from <see cref="IAssetResolver"/> (which resolves mesh/texture references drawn
+/// from inside a URDF) — here it is about "where the whole URDF file is", there it is "where the
+/// resources referenced inside the URDF are". Called by the host composition root to decide whether to
+/// load a robot.
 /// </summary>
 public static class UrdfLocator
 {
     /// <summary>
-    /// 定位要加载的 URDF 文件路径。
+    /// Finds the URDF file path to load.
     /// </summary>
     /// <param name="argument">
-    /// 命令行显式给出的路径；存在则直接使用（绝对化后返回）。可为 null。
+    /// A path explicitly given on the CLI; if it exists it is returned (after absolutizing). May be null.
     /// </param>
     /// <param name="extraSearchRoots">
-    /// 额外的搜索根目录（在默认根 <see cref="AppContext.BaseDirectory"/> 与当前目录之外）；
-    /// 每个根下会在其 <c>Assets/Models</c> 子目录中递归查找。可为 null。
+    /// Extra search root directories (in addition to the default roots
+    /// <see cref="AppContext.BaseDirectory"/> and the current directory); each root is searched
+    /// recursively under its <c>Assets/Models</c> subdirectory. May be null.
     /// </param>
-    /// <returns>找到的 .urdf 绝对路径；找不到返回 null。</returns>
+    /// <returns>The absolute path of the found .urdf, or null if none is found.</returns>
     public static string? Find(string? argument, params string?[]? extraSearchRoots)
     {
         if (!string.IsNullOrWhiteSpace(argument) && File.Exists(argument))

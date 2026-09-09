@@ -16,26 +16,26 @@ public class ShaderProgram : IDisposable
     {
         _gl = gl;
 
-        // 编译顶点着色器
+        // Compile the vertex shader.
         uint vertex = _gl.CreateShader(ShaderType.VertexShader);
         _gl.ShaderSource(vertex, vertexSrc);
         _gl.CompileShader(vertex);
         CheckShaderError(vertex, "VERTEX");
 
-        // 编译片段着色器
+        // Compile the fragment shader.
         uint fragment = _gl.CreateShader(ShaderType.FragmentShader);
         _gl.ShaderSource(fragment, fragmentSrc);
         _gl.CompileShader(fragment);
         CheckShaderError(fragment, "FRAGMENT");
 
-        // 链接程序
+        // Link the program.
         _handle = _gl.CreateProgram();
         _gl.AttachShader(_handle, vertex);
         _gl.AttachShader(_handle, fragment);
         _gl.LinkProgram(_handle);
         CheckProgramError();
 
-        // 清除中间着色器对象
+        // Clean up the intermediate shader objects.
         _gl.DetachShader(_handle, vertex);
         _gl.DetachShader(_handle, fragment);
         _gl.DeleteShader(vertex);
@@ -44,7 +44,7 @@ public class ShaderProgram : IDisposable
 
     public void Use() => _gl.UseProgram(_handle);
 
-    // ---- Uniform 写入：location 只查询一次并缓存，之后的 set 调用不再重复 GetUniformLocation ----
+    // ---- Uniform writes: the location is queried once and cached; subsequent set calls do not re-query GetUniformLocation ----
 
     public void SetUniform(string name, int value) => SetIfValid(name, loc => _gl.Uniform1(loc, value));
 
@@ -94,10 +94,11 @@ public class ShaderProgram : IDisposable
 
     public void SetUniform(string name, Matrix4x4 value)
     {
-        // 保持 transpose = false：
-        // System.Numerics.Matrix4x4 采用行主序存储 + 行向量约定（v' = v·M）。
-        // 以 false 直接传入时，GLSL 将行主序解释为列主序，得到 M^T；
-        // 列向量变换 M^T·p 与行向量变换 p·M 结果一致，几何与法线矩阵自洽。
+        // Keep transpose = false:
+        // System.Numerics.Matrix4x4 is row-major with a row-vector convention (v' = v·M).
+        // Passing it as false makes GLSL interpret row-major as column-major, giving M^T;
+        // the column-vector transform M^T·p equals the row-vector transform p·M, so geometry and
+        // normal matrices stay consistent.
         int loc = GetLocation(name);
         if (loc == -1) return;
         unsafe { _gl.UniformMatrix4(loc, 1, false, (float*)&value); }
@@ -119,7 +120,7 @@ public class ShaderProgram : IDisposable
         return loc;
     }
 
-    /// <summary>检查着色器编译错误。</summary>
+    /// <summary>Checks a shader for compile errors.</summary>
     private void CheckShaderError(uint shader, string stage)
     {
         _gl.GetShader(shader, ShaderParameterName.CompileStatus, out int status);
@@ -127,7 +128,7 @@ public class ShaderProgram : IDisposable
             throw new Exception($"{stage} shader error: {_gl.GetShaderInfoLog(shader)}");
     }
 
-    /// <summary>检查程序链接错误。</summary>
+    /// <summary>Checks the program for link errors.</summary>
     private void CheckProgramError()
     {
         _gl.GetProgram(_handle, ProgramPropertyARB.LinkStatus, out int status);

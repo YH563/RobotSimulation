@@ -19,7 +19,7 @@ void main()
     vec4 worldPos = uModel * vec4(aPosition, 1.0);
     v_worldPos = worldPos.xyz;
     v_uv = aTexCoord;
-    // 法线从模型空间转到世界空间（逆转置，兼容非均匀缩放）
+    // Transform normals from model space to world space (inverse-transpose, to support non-uniform scale).
     v_normal = normalize(mat3(transpose(inverse(uModel))) * aNormal);
     v_tangent = normalize(mat3(transpose(inverse(uModel))) * aTangent);
     gl_Position = uProjection * uView * worldPos;

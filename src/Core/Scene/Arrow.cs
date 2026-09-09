@@ -6,13 +6,13 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
-/// 箭头（<see cref="GameObject"/>，模型通道）：沿局部 +Z 的实心箭头
-/// （尾端 z=0 … 尖端 z=Length），由圆柱杆 + 圆锥头合并为单个网格。
-/// 用 <see cref="Transform"/> 可自由放置/指向任意方向。
+/// Arrow (<see cref="GameObject"/>, Model pass): a solid arrow along local +Z
+/// (tail z=0 … tip z=Length), made of a cylinder shaft plus a cone head combined into a single mesh.
+/// Use a <see cref="Transform"/> to place/point it in any direction.
 /// </summary>
 public sealed class Arrow : GameObject
 {
-    /// <summary>箭头总长。</summary>
+    /// <summary>Total arrow length.</summary>
     public float Length { get; }
 
     public Arrow(
@@ -32,7 +32,8 @@ public sealed class Arrow : GameObject
     }
 
     /// <summary>
-    /// 独立生成箭头网格数据（供外部共享复用时调用，例如各对象局部坐标系使用同一份单位箭头）。
+    /// Generates the arrow mesh data independently (for reuse, e.g. sharing one unit arrow across
+    /// each object's local axes).
     /// </summary>
     public static MeshData CreateArrowMesh(
         float length = 1f,
@@ -45,17 +46,17 @@ public sealed class Arrow : GameObject
     private static MeshData BuildMesh(float length, float shaftRadius, float headRadius, float headLength, int segments)
     {
         if (length <= 0f || float.IsNaN(length) || float.IsInfinity(length))
-            throw new ArgumentOutOfRangeException(nameof(length), length, "箭长必须为正的有限数值。");
+            throw new ArgumentOutOfRangeException(nameof(length), length, "Arrow length must be a positive finite value.");
         if (headRadius <= shaftRadius)
-            throw new ArgumentException("headRadius 应大于 shaftRadius（否则锥头不可见）。", nameof(headRadius));
+            throw new ArgumentException("headRadius must be greater than shaftRadius (otherwise the cone head is invisible).", nameof(headRadius));
         if (headLength <= 0f || headLength >= length)
-            throw new ArgumentOutOfRangeException(nameof(headLength), headLength, "headLength 应大于 0 且小于总长。");
+            throw new ArgumentOutOfRangeException(nameof(headLength), headLength, "headLength must be greater than 0 and less than the total length.");
 
         float shaftLen = length - headLength;
 
-        // 圆柱杆（CreateCylinder 轴沿 +Z、跨度为 -l/2..+l/2），中心抬到 z=shaftLen/2 → 尾端 0..shaftLen
+        // Cylinder shaft (CreateCylinder axis along +Z, spanning -l/2..+l/2), lifted so the tail is at z=0..shaftLen.
         MeshData shaft = Primitives.CreateCylinder(shaftRadius, shaftLen, segments);
-        var head = Primitives.CreateCone(headRadius, headLength, segments);   // 跨 -h/2..+h/2
+        var head = Primitives.CreateCone(headRadius, headLength, segments);   // spans -h/2..+h/2
 
         var merged = new MeshData();
         Append(merged, shaft, new Vector3(0f, 0f, shaftLen * 0.5f));
@@ -63,7 +64,7 @@ public sealed class Arrow : GameObject
         return merged;
     }
 
-    /// <summary>把 src 网格整体平移 offset 后追加到 target（索引自动偏移）。</summary>
+    /// <summary>Appends the src mesh to target after translating by offset (indices are offset automatically).</summary>
     private static void Append(MeshData target, MeshData src, Vector3 offset)
     {
         uint baseIndex = (uint)target.VertexCount;

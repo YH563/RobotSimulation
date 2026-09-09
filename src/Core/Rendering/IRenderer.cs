@@ -4,13 +4,13 @@ using RobotSimulation.Core.Scene;
 namespace RobotSimulation.Core.Rendering;
 
 /// <summary>
-/// 渲染器（对外接口层）：负责把场景绘制到当前渲染上下文。
-/// 实现层（如 RobotSimulation.OpenGL.Rendering.Renderer）内部持有 GPU 资源生命周期；
-/// 调用方只依赖本接口与纯数据场景（SceneGraph/GameObject/MeshData/MaterialData）。
-/// <see cref="Render"/> 必须在渲染线程调用。
+/// Renderer (public interface layer): draws a scene into the current rendering context.
+/// The implementation layer (e.g. RobotSimulation.OpenGL.Rendering.Renderer) owns the GPU resource
+/// lifecycle internally; callers depend only on this interface and the pure-data scene
+/// (SceneGraph/GameObject/MeshData/MaterialData). <see cref="Render"/> must be called on the render thread.
 /// </summary>
 public interface IRenderer : IDisposable
 {
-    /// <summary>绘制整个场景。</summary>
+    /// <summary>Draws the entire scene.</summary>
     void Render(SceneGraph scene);
 }

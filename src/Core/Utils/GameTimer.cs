@@ -5,7 +5,7 @@ using System.Threading;
 namespace RobotSimulation.Core.Utils;
 
 /// <summary>
-/// 独立计时器
+/// A standalone timer that fires <see cref="Tick"/> at a fixed frame rate on a background thread.
 /// </summary>
 public class GameTimer : IDisposable
 {
@@ -13,18 +13,18 @@ public class GameTimer : IDisposable
     private Timer? _timer;
     private readonly object _lock = new();
     private bool _disposed = false;
-    
-    // 目标帧率，默认60帧
+
+    // Target frame rate, default 60 fps.
     public int TargetFps { get; set; } = 60;
     public bool IsRunning { get; private set; } = false;
-    
-    // 每次 Update 触发的事件，参数为增量时间（秒）
+
+    // Raised on every Update; the argument is the elapsed time (seconds).
     public event Action<float>? Tick;
-    
+
     public GameTimer(){}
-    
+
     /// <summary>
-    /// 启动计时器
+    /// Starts the timer.
     /// </summary>
     public void Start()
     {
@@ -42,9 +42,9 @@ public class GameTimer : IDisposable
             );
         }
     }
-    
+
     /// <summary>
-    /// 停止计时器（不再触发 Tick）
+    /// Stops the timer (no more Tick events).
     /// </summary>
     public void Stop()
     {
@@ -55,7 +55,7 @@ public class GameTimer : IDisposable
             _timer?.Change(Timeout.Infinite, Timeout.Infinite);
         }
     }
-    
+
     private void OnTick()
     {
         if (_disposed) return;
@@ -64,10 +64,10 @@ public class GameTimer : IDisposable
         double elapsed = _stopwatch.Elapsed.TotalSeconds;
         _stopwatch.Restart();
 
-        // 钳制增量防止物理爆炸（最大 0.1 秒）
+        // Clamp the delta to avoid physics explosions (max 0.1 s).
         float delta = (float)Math.Min(elapsed, 0.1);
 
-        // 在后台线程触发，禁止操作 OpenGL
+        // Fired on a background thread; never manipulate OpenGL here.
         Tick?.Invoke(delta);
     }
 

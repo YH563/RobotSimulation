@@ -11,20 +11,23 @@ using Silk.NET.OpenGL;
 namespace RobotSimulation.OpenGL.Rendering;
 
 /// <summary>
-/// 渲染器（绘制编排层）：遍历场景并对每个可见、且携带 <see cref="GameObject.MeshData"/> 与
-/// <see cref="GameObject.MaterialData"/> 的节点执行"数据 → GPU 资源"的实例化与绘制。
-/// 实现 <see cref="IRenderer"/>，只依赖 <see cref="GraphicsContext"/>（设备层），不直接接收 GL。
+/// Renderer (draw orchestration layer): traverses the scene and, for each visible node carrying
+/// <see cref="GameObject.MeshData"/> and <see cref="GameObject.MaterialData"/>, performs the
+/// "data → GPU resource" instantiation and drawing. Implements <see cref="IRenderer"/>, depending only
+/// on <see cref="GraphicsContext"/> (the device layer) and never receiving GL directly.
 /// </summary>
 public sealed class Renderer : IRenderer
 {
-    /// <summary>单 pass 支持的最大光源数（与 Standard.frag 的 MAX_LIGHTS 一致）。</summary>
+    /// <summary>Maximum number of lights for a single pass (matches MAX_LIGHTS in Standard.frag).</summary>
     public const int MaxLights = 8;
 
-    /// <summary>高亮 tint 混合系数：高亮节点最终颜色向 HighlightColor 混合的比例（0~1）。</summary>
+    /// <summary>Highlight tint blend factor: how much a highlighted node's final color blends toward HighlightColor (0~1).</summary>
     public const float HighlightBlend = 0.30f;
 
     private readonly GL _gl;
     private readonly ShaderProgram _modelShader;
+    /// <summary>Maximum point size supported by the driver (GL_POINT_SIZE_RANGE upper bound), used to clamp uPointSize when drawing point clouds.</summary>
+    private readonly float _maxPointSize;
 
     private readonly Dictionary<RenderPassKind, ShaderProgram> _passShaders;
     private readonly Dictionary<MeshData, Mesh> _meshCache = new();
@@ -33,14 +36,14 @@ public sealed class Renderer : IRenderer
     private readonly Dictionary<MaterialData, Material> _materialCache = new();
     private bool _disposed;
 
-    /// <param name="device">渲染上下文（设备层入口），由 Host 组装。</param>
+    /// <param name="device">The rendering context (device-layer entry), assembled by the Host.</param>
     public Renderer(GraphicsContext device)
     {
         ArgumentNullException.ThrowIfNull(device);
         _gl = device.NativeGl;
 
-        // 编译全部内嵌标准通道着色器（Model/Line/Point/Skybox）——启动即失败提示，
-        // 避免在运行途中才发现 GLSL 错误；宿主无需管理 shader 文件路径。
+        // Compile all embedded standard pass shaders (Model/Line/Point/Skybox/Axes) — fail fast at startup
+        // rather than discovering a GLSL error mid-run; the host does not manage shader file paths.
         _passShaders = new Dictionary<RenderPassKind, ShaderProgram>();
         foreach (RenderPassKind pass in Enum.GetValues<RenderPassKind>())
         {
@@ -48,13 +51,21 @@ public sealed class Renderer : IRenderer
             _passShaders[pass] = new ShaderProgram(_gl, vs, fs);
         }
 
+        // The point-cloud vertex shader outputs point size via gl_PointSize. This is only effective when
+        // GL_PROGRAM_POINT_SIZE is enabled, otherwise it falls back to the default 1px from glPointSize().
+        // It only affects GL_POINTS and is used only by point clouds, so enable it once here; also query
+        // the driver's maximum point size so uPointSize is clamped within bounds when drawing.
+        _gl.Enable(EnableCap.ProgramPointSize);
+        _gl.GetFloat(GLEnum.PointSizeRange, out Vector2 pointSizeRange);
+        _maxPointSize = pointSizeRange.Y;
+
         _modelShader = _passShaders[RenderPassKind.Model];
     }
 
-    /// <summary>按通道取着色器程序（供后续线条/点云/天空等绘制扩展使用）。</summary>
+    /// <summary>Gets the shader program for a pass (for future line/point/skybox drawing extensions).</summary>
     internal ShaderProgram GetPassShader(RenderPassKind pass) => _passShaders[pass];
 
-    /// <summary>绘制整个场景。</summary>
+    /// <summary>Draws the entire scene.</summary>
     public void Render(SceneGraph scene)
     {
         if (scene is null)
@@ -65,7 +76,7 @@ public sealed class Renderer : IRenderer
         Matrix4x4 view = scene.Camera.GetViewMatrix();
         Matrix4x4 projection = scene.Camera.GetProjectionMatrix();
 
-        // 收集光源参数：每个光源对应 uniform 数组的一个槽位
+        // Collect light parameters: each light corresponds to one slot in the uniform array.
         var colors = new Vector3[MaxLights];
         var positions = new Vector3[MaxLights];
         var directions = new Vector3[MaxLights];
@@ -90,14 +101,15 @@ public sealed class Renderer : IRenderer
             RenderNode(root, scene, view, projection);
     }
 
-    /// <summary>把光源参数写入默认着色器的 uniform 数组。</summary>
+    /// <summary>Writes the light parameters into the default shader's uniform array.</summary>
     private void ApplyLightUniforms(Vector3[] colors, Vector3[] positions, Vector3[] directions,
         int[] types, float[] intensities, int count)
     {
-        // 必须先绑定模型着色器再写 uniform：glUniform* 作用于「当前绑定程序」。
-        // 若上一帧最后绘制的是点云/线条/坐标轴等其它通道，当前绑定程序不是 Model；
-        // 不加这行会把光源写进错误的程序（模型 uLightCount 保持 0 → 平灰），
-        // 还可能污染点云/线条着色器的 uniform。此处显式绑定即根治跨通道残留。
+        // The model shader must be bound before writing uniforms: glUniform* applies to the currently
+        // bound program. If the last drawn object in the previous frame was a point cloud/line/axes pass,
+        // the bound program is not Model; without this line the lights would be written into the wrong
+        // program (model uLightCount stays 0 → flat gray) and could pollute point/line shader uniforms.
+        // Explicitly binding here fixes cross-pass residue.
         _modelShader.Use();
 
         _modelShader.SetUniform("uLightCount", count);
@@ -110,8 +122,9 @@ public sealed class Renderer : IRenderer
 
     private void RenderNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
     {
-        // 携带数据且可见的节点：按其渲染通道分派。
-        // 纯骨架/层级节点（无数据）只作为父节点递归，不阻断子树（URDF link 常如此）。
+        // Visible nodes carrying data: dispatch by render pass.
+        // Pure skeleton/hierarchy nodes (no data) only act as parents for recursion and do not block the
+        // subtree (common for URDF links).
         if (node.Visible && node.MaterialData != null)
         {
             switch (node.MaterialData.PassKind)
@@ -132,7 +145,7 @@ public sealed class Renderer : IRenderer
                     DrawAxesNode(node, scene, view, projection);
                     break;
 
-                // Skybox 属场景级环境通道，不由普通节点绘制。
+                // Skybox is a scene-level environment pass, not drawn by an ordinary node.
                 case RenderPassKind.Skybox:
                 default:
                     break;
@@ -144,22 +157,24 @@ public sealed class Renderer : IRenderer
     }
 
     /// <summary>
-    /// 坐标轴通道：轴随对象摆放/旋转，但视觉尺寸恒定（着色器内做各向同性缩放）。
-    /// 恒定尺寸参数由 <see cref="Axes"/> 自身管理（ScreenScale/Min/Max），Renderer 只读取。
+    /// Axes pass: an axis follows the object's placement/rotation but has a constant visual size (the
+    /// shader does isotropic scaling). The constant-size parameters are managed by <see cref="Axes"/>
+    /// itself (ScreenScale/Min/Max); the Renderer only reads them.
     /// </summary>
     private void DrawAxesNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
     {
         Matrix4x4 model = node.Transform.GetModelMatrix();
         Vector3 origin = model.Translation;
 
-        // 取模型矩阵纯旋转部分（去掉父级缩放），得到"无缩放的世界摆放"矩阵
+        // Take only the pure rotation part of the model matrix (dropping parent scale) to get a
+        // "scaleless world placement" matrix.
         Matrix4x4.Decompose(model, out _, out Quaternion rot, out _);
         Matrix4x4 axisModel = Matrix4x4.CreateFromQuaternion(rot) * Matrix4x4.CreateTranslation(origin);
 
-        // 箭头沿局部 +Z、总长为 Arrow.Length，用作参考长度
+        // The arrow is along local +Z with total length Arrow.Length, used as the reference length.
         float refLocalLen = (node as Arrow)?.Length ?? 1f;
 
-        // 恒定尺寸参数来自所属的 Axes（坐标轴内部管理）
+        // Constant-size parameters come from the owning Axes (managed internally by the axes).
         Axes? axes = node.Transform.Parent?.Owner as Axes;
         float ratio = axes?.ScreenScale ?? Axes.DefaultScreenScale;
         float minLen = axes?.MinWorldLength ?? Axes.DefaultMinLength;
@@ -186,10 +201,10 @@ public sealed class Renderer : IRenderer
         Mesh mesh = GetOrCreateMesh(node.MeshData!);
         Material material = GetOrCreateMaterial(node.MaterialData!);
 
-        // 渲染状态位：双面（关闭背面剔除）/ 线框，绘制前一次性设置
+        // Render state bits: double-sided (cull off) / wireframe, set once before drawing.
         ApplyRenderState(node.MaterialData!);
 
-        // 外观参数直接来自 CPU 描述（无镜像副本，无需手动同步）
+        // Appearance parameters come directly from the CPU description (no mirrored copy, no manual sync).
         material.Apply(node.MaterialData!);
         ShaderProgram shader = material.Shader;
         shader.SetUniform("uModel", node.Transform.GetModelMatrix());
@@ -198,8 +213,9 @@ public sealed class Renderer : IRenderer
         shader.SetUniform("uViewPos", scene.Camera.Position);
         shader.SetUniform("uAmbientColor", scene.AmbientColor);
 
-        // 高亮 tint：无论是否高亮都写 uHighlightMix，避免共享 shader 把上一节点的高亮残留下来
-        // （0 是无高亮；HighlightBlend > 0 时最终颜色向 HighlightColor 混合，贴图/无贴图都生效）
+        // Highlight tint: always write uHighlightMix (0 = no highlight) so a shared shader does not carry
+        // the previous node's highlight over (when HighlightBlend > 0 the final color blends toward
+        // HighlightColor, applied with or without textures).
         Vector4 hl = node.HighlightColor;
         shader.SetUniform("uHighlightMix", node.Highlighted ? HighlightBlend : 0f);
         shader.SetUniform("uHighlightColor", new Vector3(hl.X, hl.Y, hl.Z));
@@ -207,10 +223,7 @@ public sealed class Renderer : IRenderer
         mesh.Draw();
     }
 
-
-
-
-    /// <summary>Line 通道：无线光线条（网格地面/坐标轴/曲线等）。</summary>
+    /// <summary>Line pass: unlit lines (grid floor / axes / curves, etc.).</summary>
     private void DrawLineNode(GameObject node, Matrix4x4 view, Matrix4x4 projection)
     {
         ShaderProgram shader = GetPassShader(RenderPassKind.Line);
@@ -225,28 +238,25 @@ public sealed class Renderer : IRenderer
         GetOrCreate(_lineCache, node.LineData!, () => new LineMesh(_gl, node.LineData!)).Draw();
     }
 
-    /// <summary>Point 通道：无光照点集（点云）。</summary>
+    /// <summary>Point pass: unlit point set (point cloud).</summary>
     private void DrawPointNode(GameObject node, Matrix4x4 view, Matrix4x4 projection)
     {
         PointCloud2Data data = node.PointData!;
         ShaderProgram shader = GetPassShader(RenderPassKind.Point);
         shader.Use();
 
-        // 必须启用 GL_PROGRAM_POINT_SIZE，否则顶点着色器里写的 gl_PointSize 会被忽略，
-        // 点尺寸回落到 glPointSize() 的默认 1px，导致点云显示得过小。
-        _gl.Enable(EnableCap.ProgramPointSize);
-
         shader.SetUniform("uModel", node.Transform.GetModelMatrix());
         shader.SetUniform("uView", view);
         shader.SetUniform("uProjection", projection);
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
         shader.SetUniform("uPerVertexColor", data.HasColor ? 1 : 0);
-        shader.SetUniform("uPointSize", node.PointSize);
+        // GL_PROGRAM_POINT_SIZE is enabled at construction; clamp the size within [1, driver max].
+        shader.SetUniform("uPointSize", MathF.Max(1f, MathF.Min(node.PointSize, _maxPointSize)));
 
         GetOrCreate(_pointCache, data, () => new PointMesh(_gl, data)).Draw();
     }
 
-    /// <summary>按材质描述的渲染状态位切换全局 GL 状态（剔除/多边形模式）。</summary>
+    /// <summary>Toggles global GL state (culling / polygon mode) per the material's render state bits.</summary>
     private void ApplyRenderState(MaterialData material)
     {
         if (material.DoubleSided)
@@ -266,7 +276,7 @@ public sealed class Renderer : IRenderer
         return GetOrCreate(_materialCache, data, () => CreateMaterial(data));
     }
 
-    /// <summary>首次遇到某材质描述时创建 GPU 材质，并按 CPU 引用上传贴图。</summary>
+    /// <summary>Creates the GPU material on first encounter with a material description, uploading textures by CPU reference.</summary>
     private Material CreateMaterial(MaterialData data)
     {
         var material = new Material(_modelShader);
@@ -282,9 +292,9 @@ public sealed class Renderer : IRenderer
     }
 
     private Texture2D LoadTexture(TextureReference reference)
-        => new(_gl, reference.FilePath, reference.GenerateMipmaps, reference.ColorSpace);
+        => new(_gl, reference);
 
-    /// <summary>按引用键取缓存；未命中则由工厂创建并缓存。</summary>
+    /// <summary>Gets the cached value by reference key, creating and caching it via the factory on a miss.</summary>
     private static T GetOrCreate<TKey, T>(Dictionary<TKey, T> cache, TKey key, Func<T> factory)
         where TKey : notnull
     {
