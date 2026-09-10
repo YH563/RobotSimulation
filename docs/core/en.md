@@ -141,8 +141,34 @@ Load point clouds from file: static `Load(string path, string? frameId = null)` 
 ## 3. Rendering / Abstraction & data
 
 ### Interfaces
-- `IRenderContext : IDisposable`: `event Action<int,int>? Resized`, `void Resize(int width, int height)`, `void Clear(Vector4 clearColor, bool clearDepth = true)`.
-- `IRenderer : IDisposable`: `void Render(SceneGraph scene)` (must only be called from the render thread).
+- `IRenderContext : IDisposable`: `event Action<int,int>? Resized`, `void Resize(int width, int height)`, `void Clear(Vector4 clearColor, bool clearDepth = true)`, `GraphicsDeviceInfo DeviceInfo`.
+- `IRenderer : IDisposable`: `void Render(SceneGraph scene)` (must only be called from the render thread), `FrameStats Stats`.
+
+### `FrameStats` (record struct)
+Frame timing reported by a renderer. Pure data (no graphics-API types), so any backend can produce it and any host (Avalonia / WPF / bare window) can draw its own FPS overlay.
+
+| Member | Notes |
+|---|---|
+| `Fps` | Smoothed frames per second (from the interval between render calls) |
+| `LastFrameMilliseconds` | Wall-clock time of the most recent frame |
+| `AverageFrameMilliseconds` | Smoothed average frame time |
+| `FrameCount` | Total frames rendered since the renderer was created |
+| `Empty` | `static` zeroed value (before the first frame) |
+
+The backend updates it on each render call (render thread); the host only reads it.
+
+### `GraphicsDeviceInfo` (record struct)
+Static device/driver information for diagnostics and support ("which GPU/driver is this running on?"). Pure data (all strings).
+
+| Member | Notes |
+|---|---|
+| `Vendor` | Device vendor string (GL_VENDOR equivalent) |
+| `Renderer` | Renderer/GPU name string (GL_RENDERER equivalent) |
+| `ApiVersion` | Graphics API version string (GL_VERSION equivalent) |
+| `ShaderVersion` | Shading language version string (GL_SHADING_LANGUAGE_VERSION equivalent) |
+| `Unknown` | `static` empty value (backend cannot report it) |
+
+Filled by the backend from the current context; upper layers only display or log it.
 
 ### `MaterialData`
 Material description (CPU data), no GPU/shader state — GPU material instantiation and texture upload are done by the render backend at render time.

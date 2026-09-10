@@ -24,4 +24,10 @@ public interface IRenderContext : IDisposable
     /// <param name="clearColor">Clear color RGBA, components in [0,1].</param>
     /// <param name="clearDepth">Whether to also clear the depth buffer, default true.</param>
     void Clear(Vector4 clearColor, bool clearDepth = true);
+
+    /// <summary>
+    /// Static device/driver information (vendor, GPU/renderer name, API &amp; shader language versions),
+    /// filled by the backend from the current context. Pure data — read once to display or log.
+    /// </summary>
+    GraphicsDeviceInfo DeviceInfo { get; }
 }

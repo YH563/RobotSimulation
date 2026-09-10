@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
 using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
@@ -24,6 +25,9 @@ public sealed class Renderer : IRenderer
     /// <summary>Highlight tint blend factor: how much a highlighted node's final color blends toward HighlightColor (0~1).</summary>
     public const float HighlightBlend = 0.30f;
 
+    /// <summary>Exponential moving-average factor for frame-time smoothing (0~1; smaller = smoother).</summary>
+    private const double FrameSmoothing = 0.1;
+
     private readonly GL _gl;
     private readonly ShaderProgram _modelShader;
     /// <summary>Maximum point size supported by the driver (GL_POINT_SIZE_RANGE upper bound), used to clamp uPointSize when drawing point clouds.</summary>
@@ -35,6 +39,11 @@ public sealed class Renderer : IRenderer
     private readonly Dictionary<PointCloud2Data, PointMesh> _pointCache = new();
     private readonly Dictionary<MaterialData, Material> _materialCache = new();
     private bool _disposed;
+
+    private readonly Stopwatch _frameClock = new();
+    private double _smoothedFrameMs;
+    private long _frameCount;
+    private FrameStats _stats = FrameStats.Empty;
 
     /// <param name="device">The rendering context (device-layer entry), assembled by the Host.</param>
     public Renderer(GraphicsContext device)
@@ -65,6 +74,37 @@ public sealed class Renderer : IRenderer
     /// <summary>Gets the shader program for a pass (for future line/point/skybox drawing extensions).</summary>
     internal ShaderProgram GetPassShader(RenderPassKind pass) => _passShaders[pass];
 
+    /// <inheritdoc />
+    public FrameStats Stats => _stats;
+
+    /// <summary>
+    /// Updates frame timing from the interval between consecutive <see cref="Render"/> calls (render
+    /// thread). An exponential moving average smooths per-frame jitter.
+    /// </summary>
+    private void UpdateStats()
+    {
+        if (!_frameClock.IsRunning)
+        {
+            // First frame: there is no interval to measure yet — just start the clock.
+            _frameClock.Restart();
+            return;
+        }
+
+        double frameMs = _frameClock.Elapsed.TotalMilliseconds;
+        _frameClock.Restart();
+
+        _smoothedFrameMs = _smoothedFrameMs <= 0
+            ? frameMs
+            : _smoothedFrameMs + (frameMs - _smoothedFrameMs) * FrameSmoothing;
+
+        _frameCount++;
+        _stats = new FrameStats(
+            _smoothedFrameMs > 0 ? 1000.0 / _smoothedFrameMs : 0,
+            frameMs,
+            _smoothedFrameMs,
+            _frameCount);
+    }
+
     /// <summary>Draws the entire scene.</summary>
     public void Render(SceneGraph scene)
     {
@@ -72,6 +112,8 @@ public sealed class Renderer : IRenderer
             throw new ArgumentNullException(nameof(scene));
         if (_disposed)
             throw new ObjectDisposedException(nameof(Renderer));
+
+        UpdateStats();
 
         Matrix4x4 view = scene.Camera.GetViewMatrix();
         Matrix4x4 projection = scene.Camera.GetProjectionMatrix();

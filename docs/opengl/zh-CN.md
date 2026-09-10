@@ -30,6 +30,7 @@ public static class GraphicsFactory
 设备层：持有 `GL` 实例，实现视口管理、清屏与设备能力。构造函数即启用深度测试与背面剔除。
 
 - `event Action<int,int>? Resized`、`Resize(int width, int height)`、`Clear(Vector4 clearColor, bool clearDepth = true)`。
+- `GraphicsDeviceInfo DeviceInfo`：设备/驱动字符串（`Vendor` / `Renderer` / `ApiVersion` / `ShaderVersion`），构造时经 `GL.GetString` 读取一次并以纯字符串暴露（不外泄 `GLEnum`/`StringName`）。
 - `internal GL NativeGl`：供同程序集渲染层使用，不向外暴露；`GL` 仅允许存在于本类型内。
 
 ---
@@ -42,6 +43,7 @@ public static class GraphicsFactory
 - 按 `RenderPassKind`（Model/Line/Point/Axes）分发；`Skybox` 为场景级未来背景通道，不由普通节点绘制。
 - 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。
 - `HighlightBlend = 0.30f`：高亮混合系数。
+- `FrameStats Stats`：帧时序统计（`Fps` / 最近帧与平滑帧耗时 / `FrameCount`），由两次 `Render` 调用间隔经指数滑动平均得到；在渲染线程更新。
 - 出于安全，`Render` 从渲染线程调用；`_disposed` 后会抛 `ObjectDisposedException`。
 
 构造函数需要 `GraphicsContext`（设备层），宿主经 `GraphicsFactory.Create(gl)` 得到。
@@ -105,6 +107,10 @@ context.Resize(viewportWidth, viewportHeight);
 // 每帧：清屏 + 绘制
 context.Clear(new Vector4(0.2f, 0.22f, 0.25f, 1f));
 renderer.Render(scene);
+
+// 可选：读取性能/设备信息（纯数据，叠加层由宿主自绘）
+FrameStats stats = renderer.Stats;
+GraphicsDeviceInfo gpu = context.DeviceInfo;
 
 // 退出前释放
 renderer.Dispose();

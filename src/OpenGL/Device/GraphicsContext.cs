@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using RobotSimulation.Core.Rendering;
 using Silk.NET.OpenGL;
 
@@ -18,6 +19,9 @@ public sealed class GraphicsContext : IRenderContext
     /// <inheritdoc />
     public event Action<int, int>? Resized;
 
+    /// <inheritdoc />
+    public GraphicsDeviceInfo DeviceInfo { get; }
+
     private readonly GL _gl;
     private bool _disposed;
 
@@ -33,6 +37,26 @@ public sealed class GraphicsContext : IRenderContext
         _gl.Enable(EnableCap.DepthTest);
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Back);
+
+        // Read one-off device/driver strings from the current context and strip them down to pure
+        // strings, so Core/upper layers never see GLEnum/StringName.
+        DeviceInfo = new GraphicsDeviceInfo(
+            GetGlString(_gl, GLEnum.Vendor),
+            GetGlString(_gl, GLEnum.Renderer),
+            GetGlString(_gl, GLEnum.Version),
+            GetGlString(_gl, GLEnum.ShadingLanguageVersion));
+    }
+
+    /// <summary>
+    /// Reads a null-terminated GL string (e.g. GL_VENDOR) and copies it into a managed string, so no
+    /// native pointer or GL type ever leaves this type.
+    /// </summary>
+    private static unsafe string GetGlString(GL gl, GLEnum name)
+    {
+        byte* value = gl.GetString(name);
+        return value == null
+            ? string.Empty
+            : Marshal.PtrToStringAnsi((nint)value) ?? string.Empty;
     }
 
     /// <inheritdoc />

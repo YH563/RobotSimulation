@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Core\RobotSimulation.Core.csproj" />
+        <ProjectReference Include="..\Robot\RobotSimulation.Robot.csproj" />
+        <ProjectReference Include="..\OpenGL\RobotSimulation.OpenGL.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Avalonia" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.0" />
+        <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
+    </ItemGroup>
+
+    <!-- Test data lives in this project's own Assets folder (URDF models, their meshes, point clouds)
+         and is copied next to the executable, so the relative paths written into the scene builder
+         (RobotViewportControl) resolve regardless of the working directory the host was started from.
+         To change what a run loads, drop a file under Assets and add its name in there. -->
+    <ItemGroup>
+        <None Remove="Assets\**\*" />
+        <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

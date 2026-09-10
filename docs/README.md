@@ -9,6 +9,7 @@
 | **`RobotSimulation.Core`**（核心 / Core） | [`core/zh-CN.md`](core/zh-CN.md) | [`core/en.md`](core/en.md) |
 | **`RobotSimulation.Robot`**（机器人 / Robot） | [`robot/zh-CN.md`](robot/zh-CN.md) | [`robot/en.md`](robot/en.md) |
 | **`RobotSimulation.OpenGL`**（渲染后端 / OpenGL） | [`opengl/zh-CN.md`](opengl/zh-CN.md) | [`opengl/en.md`](opengl/en.md) |
+| **测试数据 / Test data** | [`testing/zh-CN.md`](testing/zh-CN.md) | [`testing/en.md`](testing/en.md) |
 
 ---
 
@@ -18,5 +19,6 @@
 2. [`core/zh-CN.md`](core/zh-CN.md) — 引擎内核的公共 API（示例、几何、渲染抽象、工具）。
 3. [`robot/zh-CN.md`](robot/zh-CN.md) — 机器人领域模型（URDF → `RobotModel` / `RobotState`）。
 4. [`opengl/zh-CN.md`](opengl/zh-CN.md) — 唯一渲染后端 + 宿主组装 + **自定义着色器**用法。
+5. [`testing/zh-CN.md`](testing/zh-CN.md) — 宿主测试的测试数据：加载了什么、文件从哪来、如何新增/下载与重新生成样本。
 
 > 仓库根入口见 [`../README.md`](../README.md)（English）与 [`../README.zh-CN.md`](../README.zh-CN.md)（中文）。

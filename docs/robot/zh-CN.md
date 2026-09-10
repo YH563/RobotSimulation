@@ -111,7 +111,7 @@ public interface IAssetResolver { string? Resolve(string uri, string? baseDirect
 public static string? UrdfLocator.Find(string? argument, params string?[]? extraSearchRoots);
 ```
 
-在 `AppContext.BaseDirectory`、当前目录及额外搜索根下的 `Assets/Models`（递归）中查找；`argument` 若为存在的文件路径则直接返回（绝对化）。
+在 `AppContext.BaseDirectory`、当前目录及额外搜索根下，按 `Assets/Models`（各宿主测试拷到自己可执行文件旁的目录）逐个递归查找；`argument` 若为存在的文件路径则直接返回（绝对化）。
 
 ---
 

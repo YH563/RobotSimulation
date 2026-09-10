@@ -13,4 +13,10 @@ public interface IRenderer : IDisposable
 {
     /// <summary>Draws the entire scene.</summary>
     void Render(SceneGraph scene);
+
+    /// <summary>
+    /// Latest frame timing statistics (FPS / frame time), updated by the backend on each
+    /// <see cref="Render"/> call. Pure data, so the host can display a performance overlay.
+    /// </summary>
+    FrameStats Stats { get; }
 }

@@ -141,8 +141,34 @@ ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述�
 ## 3. Rendering / 渲染抽象与数据
 
 ### 接口 / Interfaces
-- `IRenderContext : IDisposable`：`event Action<int,int>? Resized`、`void Resize(int width, int height)`、`void Clear(Vector4 clearColor, bool clearDepth = true)`。
-- `IRenderer : IDisposable`：`void Render(SceneGraph scene)`（必须只从渲染线程调用）。
+- `IRenderContext : IDisposable`：`event Action<int,int>? Resized`、`void Resize(int width, int height)`、`void Clear(Vector4 clearColor, bool clearDepth = true)`、`GraphicsDeviceInfo DeviceInfo`。
+- `IRenderer : IDisposable`：`void Render(SceneGraph scene)`（必须只从渲染线程调用）、`FrameStats Stats`。
+
+### `FrameStats`（record struct）
+渲染器上报的帧时序统计。纯数据（不含任何图形 API 类型），因此任何后端都能产出、任何宿主（Avalonia / WPF / 裸窗口）都能自绘 FPS 叠加层。
+
+| 成员 | 说明 |
+|---|---|
+| `Fps` | 平滑后的帧率（基于两次渲染调用的间隔） |
+| `LastFrameMilliseconds` | 最近一帧的墙钟耗时 |
+| `AverageFrameMilliseconds` | 平滑后的平均帧耗时 |
+| `FrameCount` | 自渲染器创建以来累计渲染帧数 |
+| `Empty` | `static` 全零值（首帧之前） |
+
+后端在每次渲染调用时更新（渲染线程），宿主只读取。
+
+### `GraphicsDeviceInfo`（record struct）
+用于诊断与支持的静态设备/驱动信息（「这台机器跑在什么显卡/驱动上？」）。纯数据（全部为字符串）。
+
+| 成员 | 说明 |
+|---|---|
+| `Vendor` | 设备厂商字符串（等价 GL_VENDOR） |
+| `Renderer` | 渲染器/显卡名（等价 GL_RENDERER） |
+| `ApiVersion` | 图形 API 版本字符串（等价 GL_VERSION） |
+| `ShaderVersion` | 着色语言版本字符串（等价 GL_SHADING_LANGUAGE_VERSION） |
+| `Unknown` | `static` 空值（后端无法上报时） |
+
+由后端从当前上下文填充；上层只用于显示或记录日志。
 
 ### `MaterialData`
 材质描述（CPU 数据），无 GPU/着色器状态——具体 GPU 材质实例化与贴图上传由渲染后端在渲染时完成。

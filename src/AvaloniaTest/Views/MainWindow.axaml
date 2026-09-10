@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:AvaloniaTest.Controls"
+        x:Class="AvaloniaTest.Views.MainWindow"
+        Title="RobotSimulation - Avalonia Embedded Host"
+        Width="1100" Height="760">
+    <Grid RowDefinitions="*,Auto">
+
+        <!-- The only UI type that touches the library: a RobotViewport-style control. -->
+        <controls:RobotViewportControl x:Name="Viewport" />
+
+        <!-- The library ships no HUD: GPU / frame-rate data is written to the console with exactly the
+             lines the bare-window host writes, so the window keeps only the pointer hints plus the
+             latest user-facing message (e.g. the pick result). -->
+        <StackPanel Grid.Row="1" Margin="12" Spacing="4">
+            <TextBlock x:Name="HintText"
+                       Text="Left-drag rotate | Middle-drag pan | Right-drag or wheel zoom | Left-click pick" />
+        </StackPanel>
+
+    </Grid>
+</Window>

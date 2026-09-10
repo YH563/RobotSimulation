@@ -30,6 +30,7 @@ public static class GraphicsFactory
 Device layer: holds the `GL` instance, manages viewport, clear, and device capabilities. The ctor enables depth test and back-face culling.
 
 - `event Action<int,int>? Resized`, `Resize(int width, int height)`, `Clear(Vector4 clearColor, bool clearDepth = true)`.
+- `GraphicsDeviceInfo DeviceInfo`: device/driver strings (`Vendor` / `Renderer` / `ApiVersion` / `ShaderVersion`) read once from `GL.GetString` at construction and exposed as pure strings (no `GLEnum`/`StringName` leaks out).
 - `internal GL NativeGl`: for the assembly's render layer only, not exposed outward; `GL` is allowed only inside this type.
 
 ---
@@ -42,6 +43,7 @@ Device layer: holds the `GL` instance, manages viewport, clear, and device capab
 - Dispatches by `RenderPassKind` (Model/Line/Point/Axes); `Skybox` is a scene-level future background pass, not drawn by ordinary nodes.
 - Light params (`MaxLights = 8`) collected per frame and written into model-shader uniform arrays.
 - `HighlightBlend = 0.30f`: highlight blend factor.
+- `FrameStats Stats`: frame timing (`Fps` / last & smoothed frame ms / `FrameCount`), measured from the interval between `Render` calls with an exponential moving average; updated on the render thread.
 - For safety, `Render` is called from the render thread; after `_disposed`, throws `ObjectDisposedException`.
 
 The ctor needs a `GraphicsContext` (device layer), obtained by the host via `GraphicsFactory.Create(gl)`.
@@ -105,6 +107,10 @@ context.Resize(viewportWidth, viewportHeight);
 // per frame: clear + draw
 context.Clear(new Vector4(0.2f, 0.22f, 0.25f, 1f));
 renderer.Render(scene);
+
+// optional: read performance / device info (pure data; the host draws its own overlay)
+FrameStats stats = renderer.Stats;
+GraphicsDeviceInfo gpu = context.DeviceInfo;
 
 // before exit: dispose
 renderer.Dispose();

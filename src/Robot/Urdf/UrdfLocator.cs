@@ -14,6 +14,16 @@ namespace RobotSimulation.Robot.Urdf;
 public static class UrdfLocator
 {
     /// <summary>
+    /// Model directory conventions searched under each root, in order: a host-local <c>Assets/Models</c>
+    /// folder. Every host test keeps its own <c>Assets</c> tree next to its executable, so this is the
+    /// only convention there is to guess.
+    /// </summary>
+    private static readonly string[] ModelDirectoryConventions =
+    {
+        Path.Combine("Assets", "Models"),
+    };
+
+    /// <summary>
     /// Finds the URDF file path to load.
     /// </summary>
     /// <param name="argument">
@@ -22,7 +32,7 @@ public static class UrdfLocator
     /// <param name="extraSearchRoots">
     /// Extra search root directories (in addition to the default roots
     /// <see cref="AppContext.BaseDirectory"/> and the current directory); each root is searched
-    /// recursively under its <c>Assets/Models</c> subdirectory. May be null.
+    /// recursively under the directory conventions in <see cref="ModelDirectoryConventions"/>. May be null.
     /// </param>
     /// <returns>The absolute path of the found .urdf, or null if none is found.</returns>
     public static string? Find(string? argument, params string?[]? extraSearchRoots)
@@ -36,12 +46,15 @@ public static class UrdfLocator
 
         foreach (string root in roots)
         {
-            string modelRoot = Path.Combine(root, "Assets", "Models");
-            if (!Directory.Exists(modelRoot))
-                continue;
+            foreach (string convention in ModelDirectoryConventions)
+            {
+                string modelRoot = Path.Combine(root, convention);
+                if (!Directory.Exists(modelRoot))
+                    continue;
 
-            foreach (string urdfPath in Directory.EnumerateFiles(modelRoot, "*.urdf", SearchOption.AllDirectories))
-                return urdfPath;
+                foreach (string urdfPath in Directory.EnumerateFiles(modelRoot, "*.urdf", SearchOption.AllDirectories))
+                    return urdfPath;
+            }
         }
 
         return null;

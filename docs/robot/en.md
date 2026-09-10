@@ -111,7 +111,7 @@ Locates `.urdf` files (distinct from "URDF internal asset resolution"); the host
 public static string? UrdfLocator.Find(string? argument, params string?[]? extraSearchRoots);
 ```
 
-Looks under `AppContext.BaseDirectory`, the current directory, and additional search roots' `Assets/Models` (recursively); if `argument` is an existing file path it is returned directly (absolutized).
+Looks under `AppContext.BaseDirectory`, the current directory, and additional search roots, recursively under each root's `Assets/Models` (the folder each host test copies next to its own executable); if `argument` is an existing file path it is returned directly (absolutized).
 
 ---
 

@@ -6,14 +6,16 @@
 
 ## 1. 包含的程序集 / Packages
 
-仓库按「未来可发布的 NuGet 包」边界组织，目录即程序集边界。三个库程序集 + 一个示例宿主：
+仓库按「未来可发布的 NuGet 包」边界组织，目录即程序集边界。三个库程序集 +（不发布的）宿主项目：
 
 | 程序集 / Assembly | 职责 / Responsibility | 依赖 / Depends on |
 |---|---|---|
 | **`RobotSimulation.Core`** | 引擎内核：场景对象模型（`Scene`）、纯 CPU 几何数据与模型导入（`Geometry`）、渲染抽象接口与材质/纹理描述（`Rendering`）、点云（`PointCloud2Data`）、工具（`Utils`）。零图形、零 UI 依赖。 | `AssimpNet`、`Microsoft.Extensions.Logging` |
 | **`RobotSimulation.Robot`** | 机器人领域模型：URDF / 描述（`Description`、`Urdf`）、headless 正向运动学（`State`）、机器人 `GameObject` 树构建（`RobotModel`）。 | `Core` |
 | **`RobotSimulation.OpenGL`** | 唯一渲染后端：Silk.NET OpenGL + StbImageSharp 的网格 / 材质 / 纹理 / **着色器**与渲染器（`Device`、`Rendering`、`Resources`）。 | `Core` |
-| *(sample) `RobotSimulation.Host`* | 示例宿主：窗口 + 输入 + 组装根（组合根），仅作演示，**不随库发布**。 | `Core`, `Robot`, `OpenGL` |
+| *(test) `BareWindowTest`* | 裸窗口宿主测试：极简 Silk.NET 窗口，**不含任何 UI 框架**；同时充当自动化冒烟测试（`--smoke [frames]` → 退出码 0/1）。**不发布**。 | `Core`, `Robot`, `OpenGL` |
+| *(test) `AvaloniaTest`* | Avalonia 宿主测试：把本库嵌入 `RobotViewportControl`（派生自 `Avalonia.OpenGL.Controls.OpenGlControlBase`），并把 GPU / 帧率 / 冒烟信息按**与裸窗口宿主完全相同的措辞**打印到控制台。**不发布**。 | `Core`, `Robot`, `OpenGL`, `Avalonia` |
+| *(data) `BareWindowTest/Assets`、`AvaloniaTest/Assets`* | 各宿主测试自己的测试数据：每个工程一个 `Assets/` 目录——`Models/`（URDF + mesh，如 `fairino3_v6`）与 `PointClouds/`（.pcd / .ply），由该工程的 `.csproj` 拷到自己的可执行文件旁。宿主读取的是 `Assets/` 下的固定相对路径，因此一次运行完全由代码描述：无路径参数、无共享目录、无路径表。 | — |
 
 > 打包元数据（`PackageId` / `Version` / `readme` 等）在正式发布前补全；当前 `src/{Core,Robot,OpenGL}` 的划分已等同于未来三个 NuGet 包。
 
@@ -23,6 +25,7 @@
 - **可视化原语**: `Box` / `Sphere` / `Cylinder` / `Capsule` / `GroundPlane` / `Arrow` / `Axes` / `Grid` / `Curve` / `PointCloud`。
 - **纯 CPU 渲染数据**: `MeshData` / `LineData` / `PointCloud2Data` / `MaterialData` / `TextureReference`，可任意线程构建、可复用。
 - **渲染抽象**: `IRenderContext` / `IRenderer`，`GraphicsFactory` 组合根；`OpenGL` 是唯一实现。
+- **性能与设备信息**: `IRenderer.Stats`（`FrameStats`：FPS / 帧耗时）与 `IRenderContext.DeviceInfo`（`GraphicsDeviceInfo`：显卡厂商 / 型号 / GL & GLSL 版本），均为纯数据，叠加层由宿主自绘。
 - **模型导入**: `AssimpModelLoader`（STL / OBJ / DAE / glTF 等），点云 `PointCloudIo`（PCD / PLY）。
 - **机器人**: `RobotModel`（URDF → 机器人 GameObject 树、is a `GameObject`）、`RobotState`（headless FK）、纯数据描述、可扩展的 `IAssetResolver`。
 - **自定义着色器**: OpenGL 后端内置完整 GLSL 管线（Model / Line / Point / Skybox / Axes）作为嵌入资源，架构上刻意让「着色器」成为可做到游戏引擎式的一等扩展点（详见 `docs/opengl/zh-CN.md`；单节点自定义着色器注入为下一步规划）。
@@ -98,6 +101,44 @@ renderer.Render(scene);                             // 每帧调用
 
 > 组合根（窗口、输入、GL 实例的创建）属于宿主；库只负责「拿到 `GL` 后如何组装为 `IRenderContext`/`IRenderer`」。
 
+### 4.4 嵌入 UI 框架（以 Avalonia 为例）
+
+本库从不创建窗口与 GL 上下文，所以 UI 宿主只需回答两件事：**`GL` 从哪来**、**画进哪个帧缓冲**。参考实现见 `src/AvaloniaTest/Controls/RobotViewportControl.cs`：
+
+```csharp
+public class RobotViewportControl : OpenGlControlBase          // Avalonia 按控件下发上下文
+{
+    protected override void OnOpenGlInit(GlInterface gl)
+    {
+        GL silkGl = GL.GetApi(gl.GetProcAddress);               // 把宿主的函数地址包成 Silk 门面
+        (_context, _renderer) = GraphicsFactory.Create(silkGl);  // 整个组装根就这一行
+        _scene = new SceneGraph();
+    }
+
+    protected override void OnOpenGlRender(GlInterface gl, int framebuffer)
+    {
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)framebuffer); // 画进控件自己的 FBO
+        _context.Resize(pixelWidth, pixelHeight);   // 视口用物理像素 = 控件尺寸 × RenderScaling
+        _context.Clear(_scene.BackgroundColor);
+        _renderer.Render(_scene);
+        RequestNextFrameRendering();                // 维持帧循环
+    }
+}
+```
+
+仓库内提供两个可直接运行的宿主测试，二者**不接受任何数据参数**：各自加载写在自己源码里的那份测试数据——`Assets/Models/**` 与 `Assets/PointClouds/**`，由工程文件拷到可执行文件旁——并把相同的 GPU / FPS / 冒烟信息打印到控制台，因此两次运行可以逐行对比：
+
+```bash
+# 任一宿主：渲染 120 帧、打印 GPU + FPS、退出码 0，可直接作为 CI 冒烟测试
+dotnet run --project src/BareWindowTest -- --smoke 120
+dotnet run --project src/AvaloniaTest  -- --smoke 120
+
+# 不带 --smoke 时同样的命令会打开窗口，一直运行到关窗
+dotnet run --project src/AvaloniaTest
+```
+
+一次运行只装载**一个场景**，但覆盖完整数据集：URDF 内置几何（`primitives.urdf`）、社区 `urdf_tutorial` 包里的两个机器人、带 STL mesh 的 `fairino3_v6` 机械臂、`formats.urdf` 里的全部五种 mesh 格式，以及两个 RGB 点云（PLY 的 `red`/`green`/`blue` 与 PCD 的打包 `rgb`）。数据来源、如何新增或下载更多数据见 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。
+
 ## 5. 分模块文档 / Documentation
 
 全部按模块拆分为中文 / 英文两版——见 [`docs/README.md`](docs/README.md)。
@@ -108,6 +149,7 @@ renderer.Render(scene);                             // 每帧调用
 | [`docs/core/zh-CN.md`](docs/core/zh-CN.md) | `RobotSimulation.Core` 公共 API 参考（Scene / Geometry / Rendering / Utils） |
 | [`docs/robot/zh-CN.md`](docs/robot/zh-CN.md) | `RobotSimulation.Robot` 公共 API 参考（RobotModel / Description / Urdf / State） |
 | [`docs/opengl/zh-CN.md`](docs/opengl/zh-CN.md) | `RobotSimulation.OpenGL` 公共 API + 宿主组装 + 自定义着色管线 |
+| [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md) | 测试数据指南：宿主测试加载什么、文件从哪里来（含样本重新生成与可选的下载清单） |
 
 ## 6. 约定与约定俗成 / Conventions
 
@@ -115,13 +157,13 @@ renderer.Render(scene);                             // 每帧调用
 - **单位**: 长度用米；角度/关节角用弧度；颜色用 `Vector4` RGBA，分量 `[0,1]`。
 - **渲染数据**: `MeshData` / `MaterialData` 等是纯 CPU 数据，可在任意线程构建调整；GPU 资源由渲染后端在渲染线程实例化并缓存释放。
 - **线程**: 场景修改与 `SceneGraph.Update` 在更新线程；`Render` 只在渲染线程；`Logger` 任意线程可用。
-- **依赖方向**: `Host → OpenGL/Robot → Core`；`Core` 永不引用 `Robot` / `OpenGL` / 任何 UI 框架。
+- **依赖方向**: 宿主 → `OpenGL`/`Robot` → `Core`；`Core` 永不引用 `Robot` / `OpenGL` / 任何 UI 框架。
 
 ## 7. 路线图 / Roadmap
 
 - [ ] 发布打包（`PackageId` / 版本 / NuGet 元数据）。
 - [ ] `Visualization` 显示层（rviz-like Display）与外部写入协议（Sink）。
-- [ ] 三个宿主示例 / 测试项目：裸窗口、WPF、Avalonia——各一个 `RobotViewport` 式控件，既证明本库**可独立渲染显示**，也作为收编相关测试的载体。
+- [ ] 三个宿主示例 / 测试项目：裸窗口、WPF、Avalonia——各一个 `RobotViewport` 式控件，既证明本库**可独立渲染显示**，也作为收编相关测试的载体。**已完成**：裸窗口（`src/BareWindowTest`）✔、Avalonia（`src/AvaloniaTest`）✔；WPF 待做。
 - [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。
 - [ ]（可选）额外的非 Silk 渲染后端。
 

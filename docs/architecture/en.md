@@ -18,7 +18,7 @@ This document describes the architecture from the perspective of *publishable Nu
 
 **Principles (by priority)**
 
-1. **One-way dependency**: `Host → OpenGL/Robot → Core`; no reverse references.
+1. **One-way dependency**: host → `OpenGL`/`Robot` → `Core`; no reverse references.
 2. **Domains and frameworks are separate**: `Core` does not know about robots; robot semantics live only in `Robot`.
 3. **Library boundary first**: the public API is constrained as if published as a library from the start.
 4. **Pure functions are static; stateful systems use interfaces**: pure computation uses static methods + explicit options; replaceable/lifecycle-holding systems use interfaces and instances.
@@ -30,8 +30,8 @@ This document describes the architecture from the perspective of *publishable Nu
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  (sample) RobotSimulation.Host  — exe, window/input, composition│
-│          references: Core, Robot, OpenGL                        │
+│  (test) BareWindowTest / AvaloniaTest — exe, window/input       │
+│          references: Core, Robot, OpenGL (+Avalonia)            │
 └───────────────┬─────────────────────────────────────────────────┘
                 │
    ┌────────────┴────────────┐
@@ -64,7 +64,7 @@ This document describes the architecture from the perspective of *publishable Nu
 
 1. `Core` must not reference `Robot`, `OpenGL`, or any UI framework type.
 2. `Robot` references only `Core` (CPU data like `MeshData` / `MaterialData` / `Scene`) and plain `System.Numerics`.
-3. All `Silk.NET.*` / `StbImageSharp` appear only in `OpenGL` (and the sample host's window/input), never in public signatures.
+3. All `Silk.NET.*` / `StbImageSharp` appear only in `OpenGL` (and the host tests' window/input), never in public signatures.
 4. `AssimpNet` is a native (non-managed) dependency of `Core`'s model import; it means the `Core` package ships native assets — to keep a "pure-managed light kernel", consider moving import into a sub-package (see section 7).
 
 > Dependency note: `Core`'s `Logger` (`Utils`) uses the full `Microsoft.Extensions.Logging` (it calls `LoggerFactory` internally), not just `Abstractions`.
@@ -114,14 +114,14 @@ Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag (packed as embedded resour
 | ADR-008 | Scene is pure data; GPU resource lifecycle belongs to `Renderer` (incl. caching & disposal) | zero render deps in domain |
 | ADR-009 | Basic primitives exposed as GameObject subclasses (`Box`/`Sphere`/`Cylinder`/`Capsule`/`GroundPlane`/`Arrow`/`Axes`) | `new Box(...)` then `scene.Add` |
 | ADR-010 | Input events are translated into camera commands only at the host; `Core` knows no concrete input framework | camera gesture policy belongs to the host |
-| ADR-011 | Host assembles the backend via `OpenGL/Device/GraphicsFactory` (interface-based composition root) | Host holds only `IRenderContext` / `IRenderer` |
+| ADR-011 | The host assembles the backend via `OpenGL/Device/GraphicsFactory` (interface-based composition root) | the host holds only `IRenderContext` / `IRenderer` |
 | ADR-012 | Constant screen-size axes are managed by `Axes` itself; Renderer only reads | shader does isotropic compensation |
 | ADR-013 | Camera is a "display-state object" exposing math state and `Rotate`/`Pan`/`Zoom`/`Reset`, plus `ScreenToWorldRay` | picking entry point |
 | ADR-014 | Point cloud uses ROS `sensor_msgs/PointCloud2` field layout | `PointCloud2Data` |
 | ADR-015 | Robot subtree is locked read-only after build (`Transform`); pose changes only via `RobotModel` built-in interfaces | avoid external direct mutation of joint/sub-link poses |
 | ADR-016 | `RobotState` and `RobotModel` are separate: the former is pure headless FK, the latter drives the visual tree | both share one `RobotDescription` |
 | ADR-017 | The shader pipeline ships as built-in backend resources (`EmbeddedShaders`); `Core` only defines `RenderPassKind` | extend/replace shading like a game engine, without a full engine |
-| ADR-018 | The composition root (host) provides `GL`; the backend delivers via interfaces; the host holds interfaces + viewport size | the `Host` is wholesale swappable (bare window / WPF / Avalonia) |
+| ADR-018 | The composition root (host) provides `GL`; the backend delivers via interfaces; the host holds interfaces + viewport size | the host is wholesale swappable (bare window / WPF / Avalonia) |
 
 ---
 
@@ -145,6 +145,7 @@ render loop:                        renderer.Render(scene)
 - **The update thread only writes CPU data** and must never call GL types. `SceneGraph.Update(deltaTime)` recurses into each `GameObject.Update`.
 - **`Logger` is usable on any thread**: a process-level silent facade; the host attaches providers in the composition root via `Logger.Initialize(...)`.
 - **`GameTimer`** is a background fixed-frame-rate ticker (for simulation/update), not the render loop itself.
+- **`FrameStats` / `GraphicsDeviceInfo` are pure data**: the backend updates `IRenderer.Stats` on the render thread and fills `IRenderContext.DeviceInfo` once when the device context is created; a host reads them (on whatever thread it chooses) only to display.
 
 ---
 
@@ -166,7 +167,7 @@ render loop:                        renderer.Render(scene)
 1. **Current**: single repo + namespace partitioning; `src/{Core,Robot,OpenGL}` are the future assembly/package boundaries.
 2. **After API stabilizes**: mechanically split into multiple assemblies / NuGet packages per the `core`/`robot`/`opengl` API docs; fill in `PackageId` / `Version` / `readme` metadata.
 3. **Data ingestion**: first wire an external write protocol (Sink) in-process; ROS2 bridge as a separate optional project.
-4. **Test hosts (three host projects)**: bare window, WPF, Avalonia — each with a `RobotViewport`-style control. They prove that the library **can render standalone** in different desktop frameworks and gather relevant tests, as verification only (not published). They share the same `Core`/`Robot`/`OpenGL` chain; the only host difference is "how to obtain `GL` and how to sync the viewport".
+4. **Test hosts (three host projects)**: bare window, WPF, Avalonia — each with a `RobotViewport`-style control. They prove that the library **can render standalone** in different desktop frameworks and gather relevant tests, as verification only (not published). They share the same `Core`/`Robot`/`OpenGL` chain; the only host difference is "how to obtain `GL` and how to sync the viewport". **Done so far**: `src/BareWindowTest` (no UI framework at all; also the automated smoke test, `--smoke [frames]` → exit code 0/1) and `src/AvaloniaTest` (`RobotViewportControl : OpenGlControlBase`, obtaining `GL` through `GL.GetApi(gl.GetProcAddress)` and drawing into Avalonia's per-control framebuffer); WPF is still pending. Both take the same CLI shape — `--smoke [frames]`, and nothing else — and load the test data named in their own source from their own `Assets/` tree (URDF models, meshes, point clouds), which each project file copies next to its executable. Their console output is therefore line-by-line comparable, which turns the two hosts into a cross-check of each other instead of two separate demos.
 5. **Optional**: to keep a "pure-managed light kernel", move `AssimpNet` into a standalone import sub-package.
 
 ---
