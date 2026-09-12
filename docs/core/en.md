@@ -167,7 +167,7 @@ Load point clouds from file: static `Load(string path, string? frameId = null)` 
 - `AssimpModelLoader` (static): `LoadedModel Load(string filePath, LoadOptions? options = null)`. Uses Assimp through the `Silk.NET.Assimp` bindings; pipeline includes triangulation, auto UV/normal/tangent, vertex merge, validation, and cache-friendly ordering.
 - `LoadOptions`: `Default`, `FlipUvV`, `FlipWinding`, `GlobalScale` (unit correction; URDF mesh scale belongs to Transform, not baked here).
 - `LoadedModel`: `FilePath`, `Meshes` (`IReadOnlyList<LoadedMesh>`). `LoadedMesh`: `Name`, `MeshData`, `MaterialData`.
-- **No native bootstrap**: the Assimp native library ships per-RID inside the `Silk.NET.Assimp` package, so a host has nothing to prepare (the earlier `AssimpNet`-based implementation needed a `libdl.so` compatibility link on Linux; that patch and its dedicated class went away with the migration).
+- **Native library**: the Assimp binaries ship per-RID inside the `Silk.NET.Assimp` package, so a host has nothing to install (and, unlike the earlier `AssimpNet`-based implementation, no `libdl.so` compatibility link is needed). The binding itself only looks the library up by bare name on the OS search path, which misses the `runtimes/<rid>/native` copy sitting next to the application, so `AssimpModelLoader` maps that copy by absolute path before asking for its function table — a host still has nothing to prepare.
 
 ---
 

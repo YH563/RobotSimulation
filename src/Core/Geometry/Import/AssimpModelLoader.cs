@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Utils;
 using Silk.NET.Assimp;
@@ -24,8 +25,9 @@ namespace RobotSimulation.Core.Geometry.Import;
 /// This is the one type in the library that reads native memory: Assimp returns a tree of unmanaged structs
 /// and everything here is copied out of it (into <see cref="MeshData"/> / <see cref="MaterialData"/>) before
 /// the scene is released. The native library arrives with the <c>Silk.NET.Assimp</c> package as per-RID
-/// runtime assets, so there is no bootstrap step to perform — unlike the earlier <c>AssimpNet</c>-based
-/// implementation, which needed a <c>libdl.so</c> compatibility link on Linux.
+/// runtime assets, so unlike the earlier <c>AssimpNet</c>-based implementation it needs no separate install and
+/// no <c>libdl.so</c> compatibility link — but the binding looks it up by bare name through the OS search path
+/// only, so the copy that ships next to the application is mapped explicitly first (<see cref="LoadApi"/>).
 /// </remarks>
 public static unsafe class AssimpModelLoader
 {
@@ -56,7 +58,106 @@ public static unsafe class AssimpModelLoader
     /// native library on first use, so it is neither per-call nor disposable — holding it statically is
     /// exactly what the binding expects.
     /// </summary>
-    private static readonly Assimp Api = Assimp.GetApi();
+    private static readonly Assimp Api = LoadApi();
+
+    /// <summary>
+    /// Maps the native library that ships with the <c>Silk.NET.Assimp</c> package, then asks the binding for
+    /// its function table.
+    /// </summary>
+    /// <remarks>
+    /// The binding resolves the native library by bare name only (<c>libassimp.so.5</c>, <c>Assimp64.dll</c>,
+    /// <c>libassimp.5.dylib</c>) and lets the OS search path decide — it never looks next to the application,
+    /// which is where NuGet puts the per-RID runtime assets of a framework-dependent build
+    /// (<c>runtimes/&lt;rid&gt;/native</c>). On a machine that happens to have Assimp installed system-wide the
+    /// bare name resolves and the package's own copy goes unused; on a machine that does not (a bare CI
+    /// runner, a container, a clean user PC) every name fails with "Could not load from any of the possible
+    /// library names", even though the file it wants is sitting in the application directory. Mapping the
+    /// shipped file by absolute path first makes the outcome independent of the OS search path.
+    /// </remarks>
+    private static Assimp LoadApi()
+    {
+        TryLoadBundledNative();
+        return Assimp.GetApi();
+    }
+
+    /// <summary>
+    /// Preloads the bundled native library when one was published next to the application. Never throws: if
+    /// nothing is found, or the candidate is found but cannot be mapped, the binding's own search still runs.
+    /// </summary>
+    private static void TryLoadBundledNative()
+    {
+        // Only the names the binding itself asks for: those are the ABI its function table was generated
+        // against, and a library with any other soname would not satisfy the binding's own lookup anyway.
+        string[] names;
+        if (OperatingSystem.IsWindows())
+            names = [Environment.Is64BitProcess ? "Assimp64.dll" : "Assimp32.dll"];
+        else if (OperatingSystem.IsMacOS())
+            names = ["libassimp.5.dylib"];
+        else
+            names = ["libassimp.so.5"];
+
+        try
+        {
+            foreach (string path in EnumerateBundledNativePaths(names))
+            {
+                if (NativeLibrary.TryLoad(path, out _))
+                {
+                    // The mapping deliberately outlives this call: it stays in the process for the binding.
+                    Logger.Debug($"[Import] Loaded the Assimp native library bundled with the package: {path}");
+                    return;
+                }
+
+                Logger.Warning($"[Import] The bundled Assimp native library could not be loaded: {path}");
+            }
+
+            Logger.Debug("[Import] No bundled Assimp native library next to the application; "
+                         + "the Silk.NET binding will search the OS library directories instead.");
+        }
+        catch (Exception ex)
+        {
+            // Probing the application directory must never be the reason a model import fails.
+            Logger.Warning($"[Import] Could not probe the application directory for the bundled Assimp native library: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Yields the places a framework-dependent build keeps the package's per-RID runtime assets, most likely
+    /// first: <c>runtimes/&lt;runtime identifier&gt;/native/&lt;name&gt;</c> under the application directory, then the
+    /// same file name in any other RID directory published alongside it.
+    /// </summary>
+    /// <param name="names">The file names the binding asks for, in its own preference order.</param>
+    /// <remarks>
+    /// The extra RID directories cover hosts whose output carries a differently spelled RID folder
+    /// (self-contained or distro-specific) next to the portable one the runtime reports. Loading is the filter
+    /// for those: a file built for another OS or architecture simply fails to load and the loop moves on.
+    /// </remarks>
+    private static IEnumerable<string> EnumerateBundledNativePaths(string[] names)
+    {
+        string runtimesRoot = Path.Combine(AppContext.BaseDirectory, "runtimes");
+        if (!Directory.Exists(runtimesRoot))
+            yield break;
+
+        string reportedNativeDirectory = Path.Combine(runtimesRoot, RuntimeInformation.RuntimeIdentifier, "native");
+        foreach (string name in names)
+        {
+            string path = Path.Combine(reportedNativeDirectory, name);
+            if (File.Exists(path))
+                yield return path;
+        }
+
+        foreach (string nativeDirectory in Directory.EnumerateDirectories(runtimesRoot, "native", SearchOption.AllDirectories))
+        {
+            if (string.Equals(nativeDirectory, reportedNativeDirectory, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (string name in names)
+            {
+                string path = Path.Combine(nativeDirectory, name);
+                if (File.Exists(path))
+                    yield return path;
+            }
+        }
+    }
 
     /// <summary>
     /// Imports an entire model file (one Assimp parse) and returns all submeshes (geometry + material).

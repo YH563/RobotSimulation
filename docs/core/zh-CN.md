@@ -167,7 +167,7 @@ ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述�
 - `AssimpModelLoader`（静态）：`LoadedModel Load(string filePath, LoadOptions? options = null)`。经 `Silk.NET.Assimp` 绑定使用 Assimp；管线含三角化、自动 UV/法线/切线、顶点合并、校验与缓存友好排序。
 - `LoadOptions`：`Default`、`FlipUvV`、`FlipWinding`、`GlobalScale`（unit 修正；URDF 网格 scale 属 Transform，不在此烘焙）。
 - `LoadedModel`：`FilePath`、`Meshes`（`IReadOnlyList<LoadedMesh>`）。`LoadedMesh`：`Name`、`MeshData`、`MaterialData`。
-- 原生依赖**无需初始化**：Assimp 原生库随 `Silk.NET.Assimp` 包按 RID 分发，宿主不必做任何准备（早先基于 `AssimpNet` 的实现在 Linux 上需要 `libdl.so` 兼容链接，该补丁连同其引导类已随迁移删除）。
+- 原生库：Assimp 二进制随 `Silk.NET.Assimp` 包按 RID 分发，宿主无需安装（早先基于 `AssimpNet` 的实现在 Linux 上需要 `libdl.so` 兼容链接，该补丁连同其引导类已随迁移删除）。但绑定本身只按裸名走操作系统搜索路径，找不到应用旁边的 `runtimes/<rid>/native` 副本，因此 `AssimpModelLoader` 在取函数表之前先按绝对路径映射这份副本 —— 宿主依旧无需任何准备。
 
 ---
 
