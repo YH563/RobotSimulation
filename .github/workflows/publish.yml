@@ -1,0 +1,83 @@
+name: publish
+
+# 无密钥发布（Trusted Publishing / OIDC）：每次运行向 nuget.org 换取一个「1 小时有效、一次性」的临时 API key，
+# 仓库里不保存任何长期凭据。
+#
+# 运行前需要一次性配置两处：
+#   1) nuget.org → 点用户名 → Trusted Publishing → Add policy：
+#        Repository Owner : YH563
+#        Repository       : RobotSimulation
+#        Workflow File    : publish.yml        <- 只写文件名，不要带 .github/workflows/ 路径，大小写不敏感
+#        Environment      : 留空               <- 本 workflow 不使用 GitHub Actions environment
+#        Policy owner     : 你的个人账号         Scope: Push，glob: RobotSimulation.*
+#        （glob 覆盖三个包，也允许首次发布全新的 package ID）
+#   2) 本仓库 Settings → Secrets and variables → Actions → New repository secret：
+#        NUGET_USER = 你的 nuget.org 用户名（不是邮箱；不想用 secret 也可直接把它写进下面的 user:）
+#
+# 发布新版本：先改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），再到 Actions 页面 Run workflow。
+on:
+  workflow_dispatch:
+  # 想改成「推 tag 自动发布」就取消下面注释。注意：部分平台的 OIDC ref claim 不接受 tag，
+  # 若要启用请先用 nuget.org 策略验证一次。
+  # push:
+  #   tags: [ 'v*' ]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # 允许 GitHub 为本次运行签发 OIDC token（Trusted Publishing 的前提）
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore RobotSimulation.sln
+
+      - name: Build
+        run: dotnet build RobotSimulation.sln -c Release --no-restore
+
+      # 测试夹具（URDF / 各格式网格）随仓库提交，测试是纯 headless 的（只依赖 Core + Robot），无需图形环境。
+      - name: Test
+        run: dotnet test src/RobotSimulation.Tests/RobotSimulation.Tests.csproj -c Release --no-build
+
+      - name: Pack
+        run: |
+          # 宿主工程与测试工程都设了 IsPackable=false，这里按依赖顺序显式打包三个库。
+          for p in src/Core/RobotSimulation.Core.csproj \
+                   src/Robot/RobotSimulation.Robot.csproj \
+                   src/OpenGL/RobotSimulation.OpenGL.csproj; do
+            dotnet pack "$p" -c Release --no-build -o artifacts
+          done
+          ls -l artifacts
+
+      # 换取临时 API key（有效期 1 小时，且一个 OIDC token 只能换一次），拿到后要尽快推送。
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NuGet/login 未返回临时 key，请核对本步骤的 id/outputs 名称与 nuget.org 上的 Trusted Publishing 策略。"
+            exit 1
+          fi
+          # 依赖先行：Core -> Robot -> OpenGL；.snupkg 用同一把临时 key 推，nuget.org 会自动挂上符号。
+          for p in Core Robot OpenGL; do
+            dotnet nuget push "artifacts/RobotSimulation.$p.*.nupkg" \
+              --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            dotnet nuget push "artifacts/RobotSimulation.$p.*.snupkg" \
+              --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          done
