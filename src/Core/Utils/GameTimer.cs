@@ -15,13 +15,17 @@ public class GameTimer : IDisposable
     private bool _disposed = false;
 
     // Target frame rate, default 60 fps.
+    /// <summary>Target frame rate in hertz (default 60); changing it takes effect on the next <see cref="Start"/>.</summary>
     public int TargetFps { get; set; } = 60;
+
+    /// <summary>Whether the timer is currently ticking.</summary>
     public bool IsRunning { get; private set; } = false;
 
-    // Raised on every Update; the argument is the elapsed time (seconds).
+    /// <summary>Raised once per tick on a background thread; the argument is the elapsed time in seconds (clamped to 0.1).</summary>
     public event Action<float>? Tick;
 
-    public GameTimer(){}
+    /// <summary>Creates a stopped timer; call <see cref="Start"/> to begin ticking.</summary>
+    public GameTimer() { }
 
     /// <summary>
     /// Starts the timer.
@@ -71,6 +75,7 @@ public class GameTimer : IDisposable
         Tick?.Invoke(delta);
     }
 
+    /// <summary>Stops the timer and releases the underlying system timer; safe to call more than once.</summary>
     public void Dispose()
     {
         if (_disposed) return;

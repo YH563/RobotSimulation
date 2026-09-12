@@ -1,24 +1,31 @@
-# RobotSimulation 文档 / Documentation Index
+# RobotSimulation documentation
 
-> 文档按模块 + 语言拆分为多个子文件夹；每个模块提供中文（`zh-CN.md`）与英文（`en.md`）两个独立文件。
-> Docs are split by module **and** language: each module ships a Chinese (`zh-CN.md`) and an English (`en.md`) file.
+> 简体中文版本见 [`README.zh-CN.md`](README.zh-CN.md) / For the Chinese version, see [`README.zh-CN.md`](README.zh-CN.md).
 
-| 模块 / Module | 中文 / 简体中文 | English |
+Docs are split by module **and** language: every module ships an English (`en.md`) and a Chinese (`zh-CN.md`)
+file, and this index follows the same rule — this page is the English half, its companion is
+[`README.zh-CN.md`](README.zh-CN.md).
+
+| Module | English | 简体中文 |
 |---|---|---|
-| **架构设计 / Architecture** | [`architecture/zh-CN.md`](architecture/zh-CN.md) | [`architecture/en.md`](architecture/en.md) |
-| **`RobotSimulation.Core`**（核心 / Core） | [`core/zh-CN.md`](core/zh-CN.md) | [`core/en.md`](core/en.md) |
-| **`RobotSimulation.Robot`**（机器人 / Robot） | [`robot/zh-CN.md`](robot/zh-CN.md) | [`robot/en.md`](robot/en.md) |
-| **`RobotSimulation.OpenGL`**（渲染后端 / OpenGL） | [`opengl/zh-CN.md`](opengl/zh-CN.md) | [`opengl/en.md`](opengl/en.md) |
-| **测试数据 / Test data** | [`testing/zh-CN.md`](testing/zh-CN.md) | [`testing/en.md`](testing/en.md) |
+| **Architecture** | [`architecture/en.md`](architecture/en.md) | [`architecture/zh-CN.md`](architecture/zh-CN.md) |
+| **`RobotSimulation.Core`** (kernel) | [`core/en.md`](core/en.md) | [`core/zh-CN.md`](core/zh-CN.md) |
+| **`RobotSimulation.Robot`** (robot) | [`robot/en.md`](robot/en.md) | [`robot/zh-CN.md`](robot/zh-CN.md) |
+| **`RobotSimulation.OpenGL`** (render backend) | [`opengl/en.md`](opengl/en.md) | [`opengl/zh-CN.md`](opengl/zh-CN.md) |
+| **Test hosts & data** | [`testing/en.md`](testing/en.md) | [`testing/zh-CN.md`](testing/zh-CN.md) |
 
 ---
 
-## 阅读顺序 / Suggested reading order
+## Suggested reading order
 
-1. [`architecture/zh-CN.md`](architecture/zh-CN.md) — 先看整体包化架构、边界、线程模型与设计决策（ADR）。
-2. [`core/zh-CN.md`](core/zh-CN.md) — 引擎内核的公共 API（示例、几何、渲染抽象、工具）。
-3. [`robot/zh-CN.md`](robot/zh-CN.md) — 机器人领域模型（URDF → `RobotModel` / `RobotState`）。
-4. [`opengl/zh-CN.md`](opengl/zh-CN.md) — 唯一渲染后端 + 宿主组装 + **自定义着色器**用法。
-5. [`testing/zh-CN.md`](testing/zh-CN.md) — 宿主测试的测试数据：加载了什么、文件从哪来、如何新增/下载与重新生成样本。
+1. [`architecture/en.md`](architecture/en.md) — start here: package boundaries, dependency direction, the
+   runtime/render thread model and the decisions (ADRs) behind them.
+2. [`core/en.md`](core/en.md) — the kernel's public API (scene, geometry, render abstraction, utilities).
+3. [`robot/en.md`](robot/en.md) — the robot domain model (URDF → `RobotModel` / `RobotState`).
+4. [`opengl/en.md`](opengl/en.md) — the only render backend, host composition and **custom shaders**.
+5. [`testing/en.md`](testing/en.md) — the two minimal host tests (bare window / Avalonia) and their test
+   data: what they load, where the files come from, how to switch models or regenerate samples; plus the
+   unit-level path-resolution checks in `src/RobotSimulation.Tests`.
 
-> 仓库根入口见 [`../README.md`](../README.md)（English）与 [`../README.zh-CN.md`](../README.zh-CN.md)（中文）。
+> Repo entry points: [`../README.md`](../README.md) (English) and [`../README.zh-CN.md`](../README.zh-CN.md) (中文).
+

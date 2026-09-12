@@ -1,6 +1,5 @@
 using Avalonia;
 using Microsoft.Extensions.Logging;
-using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Utils;
 
 namespace AvaloniaTest;
@@ -36,9 +35,9 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        // Assimp's native runtime must exist before any mesh import (URDF meshes are loaded later,
-        // from inside the viewport control), and the host owns the logging destinations.
-        AssimpNative.EnsureRuntime();
+        // Mesh import (URDF meshes are loaded later, from inside the viewport control) needs no runtime
+        // preparation: the Assimp native library ships per-RID with the bindings. The host owns the
+        // logging destinations.
         Logger.Initialize(builder => builder.AddSimpleConsole());
 
         ParseArguments(args);

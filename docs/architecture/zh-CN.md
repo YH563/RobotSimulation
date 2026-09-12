@@ -56,7 +56,7 @@
 
 | 库 / Package | 对外职责 / Public responsibility | 依赖 / Depends on |
 |---|---|---|
-| `Core` | 场景对象模型、纯 CPU 数据、渲染抽象接口、点云/模型导入、工具 | `AssimpNet`、`Microsoft.Extensions.Logging`（`Logger`） |
+| `Core` | 场景对象模型、纯 CPU 数据、渲染抽象接口、点云/模型导入、工具 | `Silk.NET.Assimp`、`Microsoft.Extensions.Logging`（`Logger`） |
 | `Robot` | 机器人描述 / URDF / headless FK / `RobotModel` 树 | `Core` |
 | `OpenGL` | 唯一渲染后端（设备层 + 渲染器 + GPU 资源 + 着色器） | `Core` |
 
@@ -65,7 +65,7 @@
 1. `Core` 不得引用 `Robot` / `OpenGL` / 任何 UI 框架类型。
 2. `Robot` 仅引用 `Core`（用于 `MeshData` / `MaterialData` / `Scene` 等 CPU 数据）与纯 `System.Numerics`。
 3. 所有 `Silk.NET.*` / `StbImageSharp` 只在 `OpenGL`（及宿主测试的窗口/输入）出现，永不出现在 public 签名。
-4. `AssimpNet` 是 `Core` 模型导入的非托管依赖；它使 `Core` 在发布时带上原生资产——如需「纯托管轻内核」，可将其下沉为导入子包（见第 7 节取舍）。
+4. `Silk.NET.Assimp` 是 `Core` 模型导入的非托管依赖；它使 `Core` 在发布时带上原生资产（按 RID 分发，宿主无需任何引导）——如需「纯托管轻内核」，可将其下沉为导入子包（见第 7 节取舍）。
 
 > 依赖说明：`Core` 的 `Logger`（`Utils`）使用完整 `Microsoft.Extensions.Logging`（内部 `LoggerFactory`），而非仅 `Abstractions`。
 
@@ -75,19 +75,27 @@
 
 **`Core/`**
 ```text
-Scene/       GameObject, Transform, SceneGraph, Camera, Light, 图元(GameObject 派生)
-Geometry/    Primitives(internal), Raycast/Bounds/Intersect, 点云 PointCloud2Data/PointCloudIo,
-             Import/ (AssimpModelLoader, LoadOptions, LoadedModel, AssimpNative)
-Rendering/   IRenderContext, IRenderer, MaterialData, TextureReference/TextureColorSpace, RenderPassKind
-Utils/       GameTimer, Logger, MathUtils
+Scene/          框架内核: GameObject, Transform, SceneGraph, Camera, Light, RaycastHit
+  Primitives/     拿来即用的节点: Box/Sphere/Cylinder/Capsule/GroundPlane/Arrow/Axes/Grid/Curve/PointCloud
+  Behaviors/      每帧逻辑注入: IUpdateBehavior, DelegateUpdateBehavior
+Geometry/       纯 CPU 几何: MeshData/LineData/VertexLayout, Primitives(internal), Ray/Raycast/Bounds
+  PointCloud/     点云: PointCloud2Data, PointField, PointFieldDataType, PointCloudIo
+  Import/         Assimp 模型导入: AssimpModelLoader, LoadOptions, LoadedModel
+Rendering/      渲染抽象: IRenderContext, IRenderer, MaterialData, TextureReference(+TextureColorSpace),
+                RenderPassKind, FrameStats, GraphicsDeviceInfo
+Utils/          GameTimer, Logger, MathUtils
 ```
+
+> 文件夹与命名空间**刻意解耦**（ADR-020）：文件夹可以比命名空间更细，但**绝不**因此改 `namespace`。
+> 例如 `Scene/Primitives/Box.cs` 的命名空间仍是 `RobotSimulation.Core.Scene`。重排文件夹对外部使用者零影响，
+> 由根目录 `.editorconfig` 的 `dotnet_style_namespace_match_folder = false` 固定这一约定。
 
 **`Robot/`**
 ```text
 Description/ RobotDescription, Link/Visual/Geometry/Joint 等纯数据; GeometryDescription
-Urdf/        UrdfParser(internal), IAssetResolver/FileSystemAssetResolver, UrdfLocator, UrdfParseException
+Urdf/        UrdfParser(internal), IAssetResolver/FileSystemAssetResolver, UrdfParseException
 State/       RobotState (headless FK)
-Model/       RobotModel (GameObject 树根 + 工厂/驱动接口)
+(根)         RobotModel (GameObject 树根 + 工厂/驱动接口)
 ```
 
 **`OpenGL/`**
@@ -122,6 +130,9 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-016 | `RobotState` 与 `RobotModel` 分离：前者纯 headless FK，后者驱动可视化树 | 两者共用同一 `RobotDescription` |
 | ADR-017 | 着色器管线作为后端内建资源（`EmbeddedShaders`），`Core` 只约定 `RenderPassKind` | 像游戏引擎一样可扩展/替换着色，但不强制完整引擎 |
 | ADR-018 | 通过组合根（宿主）提供 `GL`，后端以接口交付；宿主仅持接口与视口尺寸 | 宿主可整体切换（裸窗口 / WPF / Avalonia） |
+| ADR-019 | `GameObject` 每帧逻辑改为「组合注入」：节点挂载 `IUpdateBehavior` 行为列表，`GameObject.Update` 变为非虚派发器 | 逻辑可运行时增删/暂停/单测；`sealed` 与解析产出的节点也能扩展，无需子类 |
+| ADR-020 | 文件夹与命名空间刻意解耦：文件夹可细于命名空间，重排文件夹**不改** `namespace`（由 `.editorconfig` 关闭 IDE0130 固定） | 保住对外 API 契约；文件夹只是仓库内部组织方式 |
+| ADR-021 | URDF 资产查找改为「根回退链」：显式 `assetDirectory`（优先）→ URDF 同级目录（默认）；`package://` 的**包名一律丢弃** | 用显式资源根取代启发式猜测（`assetDirectory` ＝ MuJoCo `meshdir`）；标准 ROS 的 `urdf/`+`meshes/` 布局无需改 URDF 即可加载 |
 
 ---
 
@@ -156,7 +167,7 @@ render loop:                        renderer.Render(scene)
 | `IRenderContext` / `IRenderer` | `Core.Rendering` | 换渲染后端而不动核心/领域层 |
 | `IAssetResolver` | `Robot.Urdf` | 自定义 URDF mesh/texture 引用解析（默认 `FileSystemAssetResolver`） |
 | `RobotModel(RobotDescription, ...)` 构造 | `Robot` | 任意描述源（SDF/自定义）→ 机器人树 |
-| `GameObject.Update` 虚方法 | `Core.Scene` | 每帧更新逻辑（轨迹、动画等） |
+| `IUpdateBehavior` / `GameObject.AddUpdate` | `Core.Scene` | 每帧逻辑注入（轨迹、动画等），无需子类；类式逻辑用 `AddBehavior<T>` 挂载 |
 | `GameObject.Pickable` / 拾取 `predicate` | `Core.Scene` | 参与/过滤拾取 |
 | `EmbeddedShaders` / `ShaderProgram` | `OpenGL.Resources` | 自定义/替换 GLSL 管线（模型/线/点云/坐标轴） |
 
@@ -165,10 +176,10 @@ render loop:                        renderer.Render(scene)
 ## 7. 打包与演进
 
 1. **当前**：单仓库 + 命名空间分区；`src/{Core,Robot,OpenGL}` 即未来程序集/包边界。
-2. **API 稳定后**：按本目录 `core`/`robot`/`opengl` 各 API 文档机械拆分为多个 assembly / NuGet 包；补齐 `PackageId` / `Version` / `readme` 等元数据。
+2. **API 稳定后**：按本目录 `core`/`robot`/`opengl` 各 API 文档机械拆分为多个 assembly / NuGet 包；补齐 `PackageId` / `Version` / `readme` 等元数据。**已就位**：三个库工程（`Core` / `OpenGL` / `Robot`）都开了 `<GenerateDocumentationFile>`，因此 `CS1591`（公共成员缺 XML 注释）在构建时会被报出并被保持为零，`RobotSimulation.*.xml` 也已随构建产出——打包后 IntelliSense 文档自动随包。
 3. **数据接入**：先同进程接外部写入协议（Sink）打通；ROS2 桥接作为独立可选工程。
-4. **测试宿主（三宿主测试项目）**：裸窗口、WPF、Avalonia 三个宿主示例/测试项目——每个内置一个 `RobotViewport` 式控件，既证明本库**能在不同桌面框架下独立渲染显示**，也把相关测试收编进去；仅作验证，不随库发布。它们共享同一 `Core`/`Robot`/`OpenGL` 链路，宿主差异只在「如何拿 `GL` 与如何同步视口」。**当前进展**：`src/BareWindowTest`（完全不含 UI 框架；同时是自动化冒烟测试，`--smoke [frames]` → 退出码 0/1）与 `src/AvaloniaTest`（`RobotViewportControl : OpenGlControlBase`，经 `GL.GetApi(gl.GetProcAddress)` 取 `GL`，并画进 Avalonia 按控件下发的帧缓冲）已完成；WPF 待做。两者命令形态一致——只有 `--smoke [frames]` 一个开关；加载哪些数据写在各自源码里，来自各自的 `Assets/` 目录（URDF 模型、mesh、点云），由各自工程文件拷到可执行文件旁。因此两者的控制台输出可逐行对比，两个宿主互为交叉校验，而不只是两个独立演示。
-5. **可选**：为满足「纯托管轻内核」可将 `AssimpNet` 下沉为独立导入子包。
+4. **测试宿主（三宿主测试项目）**：裸窗口、WPF、Avalonia 三个宿主示例/测试项目——每个内置一个 `RobotViewport` 式控件，既证明本库**能在不同桌面框架下独立渲染显示**，也把相关测试收编进去；仅作验证，不随库发布。它们共享同一 `Core`/`Robot`/`OpenGL` 链路，宿主差异只在「如何拿 `GL` 与如何同步视口」。**当前进展**：`src/BareWindowTest`（完全不含 UI 框架；同时是自动化冒烟测试，`--smoke [frames]` → 退出码 0/1）与 `src/AvaloniaTest`（`RobotViewportControl : OpenGlControlBase`，经 `GL.GetApi(gl.GetProcAddress)` 取 `GL`，并画进 Avalonia 按控件下发的帧缓冲）已完成；WPF 待做。两者命令形态一致——只有 `--smoke [frames]` 一个开关。场景内容刻意压到最小：只装**一个 URDF 机器人**（`fairino3_v6`），相机沿用 `SceneGraph` 构造函数摆好的默认位姿，窗口里只有轨道相机与点击高亮——它们既是端到端检查，也是**可照抄的最小嵌入示例**。被加载的文件名写在各自源码里的一个常量中，来自各自的 `Assets/` 目录，由各自工程文件拷到可执行文件旁。因此两者的控制台输出可逐行对比，两个宿主互为交叉校验，而不只是两个独立演示；要换成别的模型（`Assets/` 里另有内置几何、社区包、五种 mesh 格式与点云样例）见 `docs/testing`。
+5. **可选**：为满足「纯托管轻内核」可将 `Silk.NET.Assimp` 下沉为独立导入子包。
 
 ---
 

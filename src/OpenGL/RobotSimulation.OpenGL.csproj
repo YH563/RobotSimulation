@@ -5,6 +5,15 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Public API documentation: emit the XML doc file next to the assembly. The compiler then
+             reports CS1591 for every public member that has no XML comment, and a future NuGet package
+             carries the IntelliSense text. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
+             the repo-root Directory.Build.props. -->
+        <PackageId>RobotSimulation.OpenGL</PackageId>
+        <Description>The OpenGL render backend for RobotSimulation: Silk.NET OpenGL device and context, mesh / material / texture upload, the built-in GLSL pipeline (model, line, point, skybox, axes) and the renderer. The only backend implementation; the host's own Silk.NET GL handle is what crosses the boundary (GraphicsFactory / GraphicsContext and the resource types uploaded through them), and every GL object below that line is owned here.</Description>
+        <PackageTags>robot;opengl;renderer;silk.net;shader;3d;visualization</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
@@ -18,6 +27,12 @@
 
     <ItemGroup>
         <EmbeddedResource Include="Shaders\**\*.vert;Shaders\**\*.frag" />
+    </ItemGroup>
+
+    <!-- The package README and license: one file each for the whole family, taken from the repo root. -->
+    <ItemGroup>
+      <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+      <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
     </ItemGroup>
 
 </Project>

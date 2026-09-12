@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsTestProject>true</IsTestProject>
+        <!-- Test project, not a library: never produce a NuGet package for it. -->
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Core\RobotSimulation.Core.csproj" />
+        <ProjectReference Include="..\Robot\RobotSimulation.Robot.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+        <PackageReference Include="xunit" Version="2.9.3" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    </ItemGroup>
+
+    <!-- Fixture data (a standard ROS workspace layout) is read in place from the repo checkout rather than
+         copied next to the executable, and the hosts' shared model samples are read from their own tree —
+         see TestAssets.cs. That is why there is no Content/CopyToOutputDirectory item here: it keeps the
+         ~12 MB of model samples out of a third copy and picks up an edited fixture without a rebuild. -->
+
+</Project>

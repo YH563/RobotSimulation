@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<robot name="ros_layout_bot">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <mesh filename="package://my_pkg/meshes/cube.stl"/>
+      </geometry>
+    </visual>
+  </link>
+</robot>

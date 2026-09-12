@@ -7,9 +7,17 @@ using System.Runtime.CompilerServices;
 
 namespace RobotSimulation.Core.Scene;
 
+/// <summary>
+/// Local pose of a <see cref="GameObject"/> (position / rotation / scale) plus its place in the scene tree.
+/// The pose is local to <see cref="Parent"/>; <see cref="GetModelMatrix"/> composes the chain up to the
+/// root to yield the world matrix. A subtree can be locked via <see cref="IsReadOnly"/>.
+/// </summary>
 public class Transform
 {
+    /// <summary>Scene node this transform belongs to (set once, at construction).</summary>
     public GameObject Owner { get; }
+
+    /// <summary>Child transforms, in attach order (kept in sync automatically by <see cref="Parent"/>).</summary>
     public List<Transform> Children { get; } = new();
 
     private Vector3 _position = Vector3.Zero;
@@ -26,6 +34,7 @@ public class Transform
     /// </summary>
     public bool IsReadOnly { get; private set; }
 
+    /// <summary>Local position relative to the parent (world position when there is no parent).</summary>
     public Vector3 Position
     {
         get => _position;
@@ -36,6 +45,7 @@ public class Transform
         }
     }
 
+    /// <summary>Local rotation relative to the parent, as a quaternion.</summary>
     public Quaternion Rotation
     {
         get => _rotation;
@@ -46,6 +56,7 @@ public class Transform
         }
     }
 
+    /// <summary>Local per-axis scale (default <see cref="Vector3.One"/>).</summary>
     public Vector3 Scale
     {
         get => _scale;
@@ -81,6 +92,10 @@ public class Transform
 
     private Transform? _parent;
 
+    /// <summary>
+    /// Parent transform, or null for a scene root. Assigning re-links the child lists on both sides
+    /// (the previous parent drops this transform, the new one gains it).
+    /// </summary>
     public Transform? Parent
     {
         get => _parent;
@@ -92,11 +107,14 @@ public class Transform
         }
     }
 
+    /// <summary>Creates the transform of <paramref name="owner"/> (identity pose, no parent).</summary>
+    /// <param name="owner">The scene node this transform belongs to.</param>
     public Transform(GameObject owner)
     {
         Owner = owner;
     }
 
+    /// <summary>Local matrix (scale × rotation × translation), i.e. the pose relative to the parent.</summary>
     public Matrix4x4 GetLocalMatrix()
     {
         return Matrix4x4.CreateScale(Scale) *
@@ -104,6 +122,7 @@ public class Transform
                Matrix4x4.CreateTranslation(Position);
     }
 
+    /// <summary>World matrix: this node's local matrix composed with every ancestor up to the root.</summary>
     public Matrix4x4 GetModelMatrix()
     {
         var local = GetLocalMatrix();

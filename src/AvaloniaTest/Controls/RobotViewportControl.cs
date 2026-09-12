@@ -32,49 +32,31 @@ namespace AvaloniaTest.Controls;
 /// <item>Pointer input → camera (rviz-style rotate / pan / zoom / pick).</item>
 /// </list>
 /// </para>
+/// <para>
+/// What it renders is the library's whole feature set in miniature and nothing more: one URDF robot in a
+/// default <see cref="SceneGraph"/>, which the user can orbit and pick (a click highlights the link under
+/// the cursor). The camera pose is never written here — the <see cref="SceneGraph"/> constructor already
+/// assembles a usable default scene and camera — so this class is the smallest complete Avalonia embed.
+/// </para>
 /// </summary>
 public class RobotViewportControl : OpenGlControlBase
 {
     // ------------------------------------------------------------------
     // Test data (edit only this block)
     //
-    // Byte-for-byte the same table as src/BareWindowTest/Program.cs: the two hosts are at their most
-    // useful when they load the same files in the same order, so their console output can be compared
-    // line by line. Paths are relative to this project's Assets folder, which the project file copies
-    // next to the executable, and they are written into the code on purpose — there is no path argument
-    // on the command line, so a run can never silently test something other than the checked-in data.
-    // See Assets/Models/README.md and Assets/PointClouds/README.md for where the files come from.
+    // The same single file as src/BareWindowTest/Program.cs: the two hosts are at their most useful when
+    // they load the same file, so their console output can be compared line by line. The path is relative
+    // to this project's Assets folder, which the project file copies next to the executable, and it is
+    // written into the code on purpose — there is no path argument on the command line, so a run can never
+    // silently test something other than the checked-in data.
+    // See Assets/Models/README.md for where the file comes from.
     // ------------------------------------------------------------------
 
-    /// <summary>Folder copied next to the executable that holds all test data.</summary>
+    /// <summary>Folder copied next to the executable that holds the test data.</summary>
     private const string AssetsRelativePath = "Assets";
 
-    /// <summary>URDF models loaded by every run, in load order, relative to <see cref="AssetsRelativePath"/>.</summary>
-    private static readonly string[] ModelRelativePaths =
-    {
-        "Models/primitives.urdf",                      // URDF built-in geometry
-        "Models/urdf_tutorial/02-multipleshapes.urdf", // community package (ROS urdf_tutorial)
-        "Models/urdf_tutorial/05-visual.urdf",         // community package, DAE meshes + textures
-        "Models/fairino3_v6/fairino3_v6.urdf",         // a real 6-axis robot (STL meshes)
-        "Models/formats/formats.urdf",                 // STL / OBJ+MTL / DAE / glTF / PLY
-    };
-
-    /// <summary>Point clouds loaded by every run, in load order, relative to <see cref="AssetsRelativePath"/>.</summary>
-    private static readonly string[] PointCloudRelativePaths =
-    {
-        "PointClouds/rgb_cloud.ply", // PLY ascii, separate red/green/blue channels
-        "PointClouds/rgb_cloud.pcd", // PCD ascii, packed rgb channel
-    };
-
-    /// <summary>Horizontal distance between the loaded models, so the whole data set is visible at once.</summary>
-    private const float ModelSpacing = 2.0f;
-
-    /// <summary>Point clouds float above the models at this height, this far apart.</summary>
-    private const float CloudHeight = 1.8f;
-    private const float CloudSpacing = 2.5f;
-
-    /// <summary>Rotation speed of the smoke box (degrees per second), used only to prove the frame loop runs.</summary>
-    private const double SpinDegreesPerSecond = 45.0;
+    /// <summary>The one URDF model every run loads, relative to <see cref="AssetsRelativePath"/>.</summary>
+    private const string ModelRelativePath = "Models/fairino3_v6/fairino3_v6.urdf";
 
     /// <summary>
     /// How often the GPU / frame-rate line is written to the console log (seconds). Matches the
@@ -96,12 +78,10 @@ public class RobotViewportControl : OpenGlControlBase
     private IRenderContext? _graphics;
     private IRenderer? _renderer;
     private SceneGraph? _scene;
-    private GameObject? _spinner;
     private GameObject? _selected;
 
     private string? _initError;
     private TimeSpan _lastFrameTime;
-    private double _spinDegrees;
     private double _statsLogAccumulator;
     private bool _smokeCompleted;
 
@@ -125,60 +105,28 @@ public class RobotViewportControl : OpenGlControlBase
     public event Action<long>? SmokeCompleted;
 
     /// <summary>
-    /// Loads the test data listed at the top of this file into <paramref name="scene"/> and returns the
-    /// object the frame loop animates. The data is laid out so nothing overlaps: models along X, point
-    /// clouds floating above them, and a spinning box in front of the camera (without motion a frozen
-    /// frame and a live one look identical). A missing file is reported and skipped — a host never fails
-    /// because of test data — and every loaded file is logged with the same wording as the bare-window
-    /// host, so two runs can be diffed directly. This method and the two helpers below are intentionally
-    /// identical in that host, which is what makes the diff meaningful.
+    /// Loads the model named at the top of this file into <paramref name="scene"/>. It stays at the world
+    /// origin: the library's scenes are Z-up and the robot's own base link sits at z=0, so the default
+    /// camera looks straight at it without any placement code. A missing file is reported and skipped —
+    /// a host never fails because of test data — and the logged wording is identical to the bare-window
+    /// host's, which is what makes the two console logs diffable line by line.
     /// </summary>
-    private static GameObject LoadTestData(SceneGraph scene)
+    private static void LoadRobot(SceneGraph scene)
     {
         Logger.Info($"Test data: {Path.GetFullPath(AssetsRelativePath, AppContext.BaseDirectory)}");
 
-        for (int i = 0; i < ModelRelativePaths.Length; i++)
-        {
-            if (ResolveAssetFile(ModelRelativePaths[i]) is not { } modelPath)
-                continue;
+        if (ResolveAssetFile(ModelRelativePath) is not { } modelPath)
+            return;
 
-            Logger.Info($"Loading model: {modelPath}");
-            RobotModel model = RobotModel.ParseFile(modelPath);
-            // A robot's link transforms are a read-only subtree by design, so the whole robot is placed
-            // through its built-in RootPose interface rather than by writing Transform.Position.
-            model.RootPose = Matrix4x4.CreateTranslation(
-                (i - (ModelRelativePaths.Length - 1) * 0.5f) * ModelSpacing, 0f, 0f);
-            scene.Add(model);
-        }
-
-        for (int i = 0; i < PointCloudRelativePaths.Length; i++)
-        {
-            if (ResolveAssetFile(PointCloudRelativePaths[i]) is not { } cloudPath)
-                continue;
-
-            PointCloud cloud = PointCloud.FromFile(cloudPath);
-            // The point count and the decoded colour of the first point prove that the file *and* its
-            // colour channel were understood — something a screenshot cannot tell a CI script.
-            PointCloud2Data? cloudData = cloud.PointData; // FromFile always attaches data; null is a bug
-            Logger.Info($"Loading point cloud: {cloudPath} ({cloudData?.Count ?? 0} points, " +
-                        $"color: {DescribeColor(cloudData)})");
-            cloud.Transform.Position = new Vector3(
-                (i - (PointCloudRelativePaths.Length - 1) * 0.5f) * CloudSpacing, CloudHeight, 0.6f);
-            scene.Add(cloud);
-        }
-
-        var box = new Box(0.6f, 0.6f, 0.6f, "smoke-box");
-        box.MaterialData!.BaseColor = new Vector4(0.9f, 0.55f, 0.2f, 1f);
-        box.Transform.Position = new Vector3(0f, 0.35f, 1.8f);
-        scene.Add(box);
-        return box;
+        Logger.Info($"Loading model: {modelPath}");
+        scene.Add(RobotModel.ParseFile(modelPath));
     }
 
     /// <summary>
     /// Absolute path of a file below this project's <c>Assets</c> folder, or null when it is absent (the
-    /// caller then skips that entry). Resolved against <see cref="AppContext.BaseDirectory"/> because the
-    /// project file copies <c>Assets</c> next to the executable, so the working directory a user happened
-    /// to start the host from cannot change what is loaded.
+    /// caller then skips it). Resolved against <see cref="AppContext.BaseDirectory"/> because the project
+    /// file copies <c>Assets</c> next to the executable, so the working directory a user happened to start
+    /// the host from cannot change what is loaded.
     /// </summary>
     private static string? ResolveAssetFile(string relativePath)
     {
@@ -188,20 +136,6 @@ public class RobotViewportControl : OpenGlControlBase
 
         Logger.Warning($"Test data file not found, skipping it: {fullPath}");
         return null;
-    }
-
-    /// <summary>
-    /// One-line description of the colours a cloud carries: the first point's rgba, or <c>none</c> when
-    /// the file has no colour channel at all. Reading the colour back is the only way to check that the
-    /// per-point channels were decoded rather than ignored in favour of the material colour.
-    /// </summary>
-    private static string DescribeColor(PointCloud2Data? data)
-    {
-        if (data is not { HasColor: true, Count: > 0 })
-            return "none";
-
-        Vector4 first = data.GetColor(0);
-        return $"first point rgba({first.X:F2}, {first.Y:F2}, {first.Z:F2})";
     }
 
     protected override void OnOpenGlInit(GlInterface gl)
@@ -227,12 +161,11 @@ public class RobotViewportControl : OpenGlControlBase
             Logger.Info($"GPU: {device.Renderer} | vendor: {device.Vendor} | " +
                         $"GL: {device.ApiVersion} | GLSL: {device.ShaderVersion}");
 
-            // The scene is assembled exactly as in the bare-window host: same camera, same data table,
-            // same log lines — only the way GL was obtained above differs between the two hosts.
+            // The scene is assembled exactly as in the bare-window host: a default SceneGraph (grid,
+            // lights, world axes and a usable camera pose all come from its constructor) plus the one
+            // URDF robot — only the way GL was obtained above differs between the two hosts.
             _scene = new SceneGraph();
-            _scene.Camera.Target = new Vector3(0f, 0.9f, 0f);
-            _scene.Camera.Distance = 13f;
-            _spinner = LoadTestData(_scene);
+            LoadRobot(_scene);
         }
         catch (Exception ex)
         {
@@ -266,13 +199,9 @@ public class RobotViewportControl : OpenGlControlBase
         double deltaSeconds = Math.Clamp((now - _lastFrameTime).TotalSeconds, 0, 0.25);
         _lastFrameTime = now;
 
-        if (_spinner is { } spinner)
-        {
-            _spinDegrees += deltaSeconds * SpinDegreesPerSecond;
-            spinner.Transform.Rotation = Quaternion.CreateFromAxisAngle(
-                Vector3.UnitY, (float)(_spinDegrees * Math.PI / 180.0));
-        }
-
+        // Nothing in this host animates: the frame loop exists to prove that update → clear → render
+        // runs every frame and that the GPU stays healthy while the user drives the camera.
+        _scene.Update(deltaSeconds);
         _graphics.Clear(_scene.BackgroundColor); // Clear applies the scene's background color first.
         _renderer.Render(_scene);
 

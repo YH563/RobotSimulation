@@ -27,6 +27,13 @@ public readonly struct RaycastHit
     /// <summary>Interpolation weight for vertex C of the hit triangle (second barycentric component).</summary>
     public float V { get; }
 
+    /// <summary>Creates one hit record (normally produced by the scene's ray casting, not by hand).</summary>
+    /// <param name="object">The node that owns the hit triangle.</param>
+    /// <param name="point">World-space hit point.</param>
+    /// <param name="distance">Distance from the ray origin to <paramref name="point"/>.</param>
+    /// <param name="normal">World-space hit normal.</param>
+    /// <param name="u">Barycentric weight of vertex B.</param>
+    /// <param name="v">Barycentric weight of vertex C.</param>
     public RaycastHit(GameObject @object, Vector3 point, float distance, Vector3 normal, float u, float v)
     {
         Object = @object;

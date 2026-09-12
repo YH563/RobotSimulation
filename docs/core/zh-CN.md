@@ -1,6 +1,6 @@
 # RobotSimulation.Core 公共 API（简体中文）
 
-> 状态：反映当前实际代码。命名空间：`RobotSimulation.Core.*` · 依赖：`AssimpNet`、`Microsoft.Extensions.Logging`。
+> 状态：反映当前实际代码。命名空间：`RobotSimulation.Core.*` · 依赖：`Silk.NET.Assimp`、`Microsoft.Extensions.Logging`。
 > 配套：`../architecture/zh-CN.md`、`../robot/zh-CN.md`、`../opengl/zh-CN.md`。
 
 `Core` 是引擎内核，零图形、零 UI、零机器人领域语义。它提供：场景对象模型、纯 CPU 渲染数据、渲染抽象接口、点云与模型导入、以及通用工具。所有颜色统一用 `Vector4`（RGBA，分量 `[0,1]`），坐标系为右手系 **Z-up**，长度单位米，角度单位弧度。
@@ -28,12 +28,45 @@
 | `Highlighted` | `bool` | 是否高亮（默认 false），用于选择反馈 |
 | `HighlightColor` | `Vector4` | 高亮混合色，默认橙黄 |
 | `Pickable` | `bool` | 是否参与射线拾取，默认 true |
+| `UpdateBehaviors` | `IReadOnlyList<IUpdateBehavior>` | 已挂载的更新行为（按执行顺序；无则空） |
+| `UpdateBehaviorCount` | `int` | 已挂载更新行为数量（0 = 每帧无逻辑） |
 
 方法 / Methods:
 - 构造 `GameObject(MeshData? meshData = null, MaterialData? materialData = null, string? name = "")`
 - `void SetSubtreePickable(bool value)` —— 递归设置本节点及后代的 `Pickable`
 - `void LoadModel(string filePath, LoadOptions? options = null)` —— 从模型文件（STL/OBJ/DAE/glTF）加载几何+材质到本节点（仅支持单 submesh；多 submesh 用 `AssimpModelLoader.Load`）
-- `virtual void Update(double deltaTime)` —— 每帧更新钩子
+- `void Update(double deltaTime)` —— 每帧派发：按挂载顺序调用 `Enabled` 的行为（由 `SceneGraph.Update` 父先子后调用）
+- `T AddBehavior<T>(T behavior) where T : IUpdateBehavior` —— 挂载一个行为并原样返回（便于后续卸载/暂停）
+- `DelegateUpdateBehavior AddUpdate(Action<GameObject, double> update)` —— 用 lambda 注入每帧逻辑（收到「节点, dt」）
+- `DelegateUpdateBehavior AddUpdate(Action<double> update)` —— 同上，不需要节点时使用
+- `bool RemoveBehavior(IUpdateBehavior behavior)` —— 卸载行为，返回是否曾挂载
+- `void ClearBehaviors()` —— 清空全部更新行为
+
+#### 更新行为（组合优于继承）
+
+节点不再靠「继承 + 重写 `Update`」扩展，而是**携带**逻辑：把任意多个 `IUpdateBehavior` 挂到节点上，`SceneGraph.Update` 每帧按挂载顺序、父先子后依次派发。逻辑在运行时装配，可增删、可暂停、可单测，且对 `sealed` 或由文件解析产出的节点同样适用（无需子类）。行为运行在更新线程，只可改 CPU 数据，绝不碰 GL。
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| `IUpdateBehavior` | `Core.Scene` | 契约：`bool Enabled { get; set; }` + `void Update(GameObject owner, double deltaTime)`；列表里装的就是它 |
+| `DelegateUpdateBehavior` | `Core.Scene` | 把 lambda 适配成 `IUpdateBehavior` 的语法糖，由 `AddUpdate` 创建并返回 |
+
+```csharp
+var box = new Box(new MeshData(), new MaterialData());
+scene.Add(box);
+
+float spin = 0;
+box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无需子类
+{
+    spin += (float)(dt * Math.PI);
+    go.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, spin);
+});
+```
+
+- 同一节点可挂多套互不相关的逻辑（各一个 lambda）；`RemoveBehavior` / `ClearBehaviors` 卸载，同一实例可再次挂载。
+- 暂停而不卸载：把 `AddUpdate` 返回的 `DelegateUpdateBehavior.Enabled` 置 `false`，恢复即置 `true`。
+- 复杂/可复用的逻辑可自建类实现 `IUpdateBehavior`，再用 `AddBehavior<T>` 挂载；当前**未**提供行为基类，按需再补。
+- 未挂任何行为的节点零开销：行为列表惰性创建，`Update` 仅做一次空判断。
 
 ### `Transform`
 父子层级变换，行主序/行向量。支持只读锁定：锁定后 `Position` / `Rotation` / `Scale` 的 setter 抛 `InvalidOperationException`；框架/系统内部经 `SetLocalPose` 绕过保护（内部使用）。
@@ -88,7 +121,7 @@
 ### `Light`
 `enum LightType { Directional, Point }`。成员：`Type`, `Color`（`Vector3` 强度）、`Direction` / `Position`、`Intensity`、`Range`。暴露 `WorldPosition` / `WorldDirection`（渲染用）。
 
-### `GameObject` 图元（`Geometry/`）
+### `GameObject` 图元（`Scene/Primitives/`）
 均为 `GameObject` 派生，构造即生成 CPU 网格与材质，可直接 `scene.Add`：
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)`（轴沿 +Z）/ `Capsule(radius, height, name?)`（轴沿 +Z，总高 = height + 2×radius）
 - `GroundPlane(size, name?)` / `Arrow(...)`（方向箭头）/ `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
@@ -131,10 +164,10 @@ ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述�
 从文件加载点云：静态 `Load(string path, string? frameId = null)` 按扩展名（`.pcd` / `.ply`）选解析器；`ReadPcd` / `ParsePcd` / `ReadPly` / `ParsePly`。`binary_compressed` 不支持并抛 `NotSupportedException`。
 
 ### 模型导入 `Import/`
-- `AssimpModelLoader`（静态）：`LoadedModel Load(string filePath, LoadOptions? options = null)`。使用 Assimp；管线含三角化、自动 UV/法线/切线、顶点合并、校验与缓存友好排序。
+- `AssimpModelLoader`（静态）：`LoadedModel Load(string filePath, LoadOptions? options = null)`。经 `Silk.NET.Assimp` 绑定使用 Assimp；管线含三角化、自动 UV/法线/切线、顶点合并、校验与缓存友好排序。
 - `LoadOptions`：`Default`、`FlipUvV`、`FlipWinding`、`GlobalScale`（unit 修正；URDF 网格 scale 属 Transform，不在此烘焙）。
 - `LoadedModel`：`FilePath`、`Meshes`（`IReadOnlyList<LoadedMesh>`）。`LoadedMesh`：`Name`、`MeshData`、`MaterialData`。
-- `AssimpNative`（静态）：`bool EnsureRuntime()` —— Linux 下为 Assimp 原生库建立 libdl 兼容链接（由宿主/工具组合根显式触发，库不自动运行）。
+- 原生依赖**无需初始化**：Assimp 原生库随 `Silk.NET.Assimp` 包按 RID 分发，宿主不必做任何准备（早先基于 `AssimpNet` 的实现在 Linux 上需要 `libdl.so` 兼容链接，该补丁连同其引导类已随迁移删除）。
 
 ---
 

@@ -9,7 +9,10 @@ namespace RobotSimulation.Core.Geometry;
 /// </summary>
 public readonly struct Bounds
 {
+    /// <summary>Corner with the smallest coordinate on every axis.</summary>
     public Vector3 Min { get; }
+
+    /// <summary>Corner with the largest coordinate on every axis.</summary>
     public Vector3 Max { get; }
 
     /// <summary>Center of the box.</summary>
@@ -18,6 +21,13 @@ public readonly struct Bounds
     /// <summary>Size of the box (Max - Min).</summary>
     public Vector3 Size => Max - Min;
 
+    /// <summary>
+    /// Creates a box from its two corners. There is no validation: <paramref name="min"/> is expected to be
+    /// component-wise less than or equal to <paramref name="max"/> (use <see cref="FromPoints"/> to derive
+    /// both corners from actual data).
+    /// </summary>
+    /// <param name="min">Minimum corner.</param>
+    /// <param name="max">Maximum corner.</param>
     public Bounds(Vector3 min, Vector3 max)
     {
         Min = min;

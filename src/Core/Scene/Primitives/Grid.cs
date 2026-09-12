@@ -18,6 +18,11 @@ public sealed class Grid : GameObject
     /// <summary>Cell count from the center in each direction (total span = 2 × CellCount × CellSize).</summary>
     public int CellCount { get; }
 
+    /// <summary>Creates the line-grid floor on the XY plane (z = 0).</summary>
+    /// <param name="cellSize">Cell edge length in meters.</param>
+    /// <param name="cellCount">Cells from the center in each direction (total span = 2 × count × size).</param>
+    /// <param name="color">Line color; null uses the default gray.</param>
+    /// <param name="name">Scene object name (defaults to <c>Grid</c>).</param>
     public Grid(float cellSize = 1f, int cellCount = 10, Vector4? color = null, string? name = "Grid")
         : base(null, null, name ?? nameof(Grid))
     {

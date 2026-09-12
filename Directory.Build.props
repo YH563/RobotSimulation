@@ -1,0 +1,40 @@
+<Project>
+
+    <!--
+      Packaging metadata shared by the three publishable libraries
+      (RobotSimulation.Core / RobotSimulation.Robot / RobotSimulation.OpenGL).
+
+      The two host projects and the test project set <IsPackable>false</IsPackable>, so none of this can
+      reach a package. Per-package identity (PackageId / Description / PackageTags) stays in each project
+      file, next to the code it describes; each library also emits its XML documentation file
+      (GenerateDocumentationFile in its own .csproj), which is what puts IntelliSense text in the package.
+
+      License: MIT, declared as an SPDX expression (below), covering this repository's own source. An
+      expression needs no file inside the package, but each library still packs a copy of the repo-root
+      LICENSE (see its .csproj), so the terms travel with the bits.
+    -->
+    <PropertyGroup>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <Version>0.1.0</Version>
+
+        <Authors>YH563</Authors>
+        <Company>YH563</Company>
+        <Product>RobotSimulation</Product>
+        <Copyright>Copyright (c) YH563</Copyright>
+
+        <RepositoryType>git</RepositoryType>
+        <RepositoryUrl>https://github.com/YH563/RobotSimulation.git</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/YH563/RobotSimulation</PackageProjectUrl>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+        <!-- One README for the whole package family; each library packs the repo-root copy (see its .csproj). -->
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+        <!-- Symbols: a .snupkg next to each .nupkg (portable PDBs, with untracked sources embedded). -->
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    </PropertyGroup>
+
+</Project>

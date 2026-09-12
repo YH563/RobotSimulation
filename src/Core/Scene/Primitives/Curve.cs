@@ -13,6 +13,10 @@ namespace RobotSimulation.Core.Scene;
 /// </summary>
 public sealed class Curve : GameObject
 {
+    /// <summary>Creates a polyline that connects <paramref name="points"/> in order.</summary>
+    /// <param name="points">The polyline's vertices (fewer than two points clears the line).</param>
+    /// <param name="color">Line color; null uses the default orange.</param>
+    /// <param name="name">Scene object name (defaults to <c>Curve</c>).</param>
     public Curve(IEnumerable<Vector3> points, Vector4? color = null, string? name = null)
         : base(null, null, name ?? nameof(Curve))
     {

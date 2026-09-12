@@ -17,6 +17,10 @@ public sealed class PointMesh : IDisposable
     private readonly uint _vertexCount;
     private bool _disposed;
 
+    /// <summary>Uploads the cloud's positions (and its per-point colors, when present) into fresh GPU buffers.</summary>
+    /// <param name="gl">The GL facade to create the buffers on.</param>
+    /// <param name="data">The CPU-side cloud being made drawable.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="gl"/> is null.</exception>
     public PointMesh(GL gl, PointCloud2Data data)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
@@ -62,6 +66,7 @@ public sealed class PointMesh : IDisposable
         return buffer;
     }
 
+    /// <summary>Draws every point (as GL_POINTS) and unbinds the VAO again.</summary>
     public void Draw()
     {
         _gl.BindVertexArray(_vao);
@@ -69,6 +74,7 @@ public sealed class PointMesh : IDisposable
         _gl.BindVertexArray(0);
     }
 
+    /// <summary>Deletes the VAO/VBO and the optional color buffer; safe to call more than once.</summary>
     public void Dispose()
     {
         if (_disposed) return;

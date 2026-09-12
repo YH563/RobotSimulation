@@ -10,18 +10,22 @@ public static class VertexLayout
 {
     /// <summary>Start index of the position component (in floats).</summary>
     public const int PositionFloatOffset = 0;
+    /// <summary>Number of position components (x, y, z).</summary>
     public const int PositionComponentCount = 3;
 
     /// <summary>Start index of the UV component (in floats).</summary>
     public const int UvFloatOffset = PositionFloatOffset + PositionComponentCount;
+    /// <summary>Number of UV components (u, v).</summary>
     public const int UvComponentCount = 2;
 
     /// <summary>Start index of the normal component (in floats).</summary>
     public const int NormalFloatOffset = UvFloatOffset + UvComponentCount;
+    /// <summary>Number of normal components (x, y, z).</summary>
     public const int NormalComponentCount = 3;
 
     /// <summary>Start index of the tangent component (in floats).</summary>
     public const int TangentFloatOffset = NormalFloatOffset + NormalComponentCount;
+    /// <summary>Number of tangent components (x, y, z).</summary>
     public const int TangentComponentCount = 3;
 
     /// <summary>Number of floats per vertex.</summary>

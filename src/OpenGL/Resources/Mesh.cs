@@ -15,6 +15,10 @@ public class Mesh : IDisposable
     private readonly int _indexCount;
     private bool _disposed = false;
 
+    /// <summary>Uploads an interleaved vertex array and its index buffer into a new VAO/VBO/EBO.</summary>
+    /// <param name="gl">The GL facade to create the buffers on.</param>
+    /// <param name="vertices">Vertex data in the <see cref="VertexLayout"/> layout.</param>
+    /// <param name="indices">Triangle indices into <paramref name="vertices"/>.</param>
     public Mesh(GL gl, float[] vertices, uint[] indices)
     {
         _gl = gl;
@@ -72,6 +76,7 @@ public class Mesh : IDisposable
         _gl.DrawElements(PrimitiveType.Triangles, (uint)_indexCount, DrawElementsType.UnsignedInt, (void*)0);
     }
 
+    /// <summary>Deletes the VAO/VBO/EBO; safe to call more than once.</summary>
     public void Dispose()
     {
         if (_disposed) return;

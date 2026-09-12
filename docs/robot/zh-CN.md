@@ -15,14 +15,21 @@
 
 ```csharp
 // URDF 文本 → 完整机器人树
-public static RobotModel Parse(string urdfXml, string? baseDirectory = null, IAssetResolver? resolver = null);
+public static RobotModel Parse(string urdfXml, string? baseDirectory = null,
+    IAssetResolver? resolver = null, string? assetDirectory = null);
 
 // 读取 URDF 文件 → 完整机器人树（文件目录自动作为相对资源路径基准）
-public static RobotModel ParseFile(string path, IAssetResolver? resolver = null);
+public static RobotModel ParseFile(string path, IAssetResolver? resolver = null,
+    string? assetDirectory = null);
 
 // 扩展点：任意描述源（SDF/自定义）→ 同一棵机器人树
-public RobotModel(RobotDescription description, IAssetResolver? resolver = null);
+public RobotModel(RobotDescription description, IAssetResolver? resolver = null,
+    string? assetDirectory = null);
 ```
+
+`assetDirectory` 是可选资源根（MuJoCo `meshdir` 的等价物）：mesh/贴图先在该目录下找，找不到再回退到 URDF 同级目录。**它是加载「标准 ROS 布局」的关键**——当 URDF 放在 `包根/urdf/` 而资源在 `包根/meshes/` 时，`assetDirectory: 包根` 即可，无需改动 URDF。省略（默认）＝只在 URDF 同级目录找。
+
+> `assetDirectory` 与自定义 `resolver` **互斥**：查找归 resolver 管，同时给两者只会让其中一个被静默忽略，因此构造时直接抛 `ArgumentException`。
 
 要求 `description` 恰好只有一个根 link；多根并非错误（「部分装配」），但构建为单个 `GameObject` 需要单根。
 
@@ -32,7 +39,7 @@ public RobotModel(RobotDescription description, IAssetResolver? resolver = null)
 |---|---|---|
 | `Description` | `RobotDescription` | 构建此树的纯数据描述（headless / 序列化 / 多实例复用） |
 | `RobotName` | `string` | URDF `<robot name>`；与 `GameObject.Name`（根 link 名）不同 |
-| `AssetResolver` | `IAssetResolver?` | 使用的资产路径解析器 |
+| `AssetResolver` | `IAssetResolver?` | 调用方传入的解析器；为 `null` 表示由默认 `FileSystemAssetResolver` 查找（它自身绑定工厂收到的 `assetDirectory`） |
 | `DrivableJoints` | `IReadOnlyList<Joint>` | 可驱动关节（Revolute/Continuous/Prismatic，按描述顺序） |
 | `DrivableJointCount` | `int` | 可驱动关节数（`ApplyJointValues` 所需数组长度） |
 | `RootPose` | `Matrix4x4` | 机器人整体（根 link）在父坐标系位姿；经由内置接口写入 |
@@ -96,22 +103,31 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ```csharp
 public interface IAssetResolver { string? Resolve(string uri, string? baseDirectory); }
+
+public sealed class FileSystemAssetResolver : IAssetResolver
+{
+    public string? AssetDirectory { get; }                        // 额外资源根（绝对化后保存），未配置为 null
+    public FileSystemAssetResolver(string? assetDirectory = null);
+}
 ```
 
-默认 `FileSystemAssetResolver` 规则：
-1. 绝对路径按绝对定位；
-2. 相对路径相对 URDF 文件目录（`baseDirectory`）合并；
-3. `package://package-name/rest` 剥前缀，按「URDF 同级目录作为包根」查找；
-4. 解析后仍校验存在性，缺失直接抛 `FileNotFoundException`（`Logger` 记录），不静默跳过。
+默认 `FileSystemAssetResolver` 的查找规则（**回退链，命中即止**）：
 
-### `UrdfLocator`
-定位 `.urdf` 文件（与「URDF 内部资源解析」不同）；由宿主组合根决定是否加载机器人。
+1. **绝对路径** → 原样使用；
+2. **`package://<包名>/<rest>`** → **丢掉包名**，只把 `<rest>` 当作相对路径继续（见下）。包名**从不**用来匹配目录名：它是 ROS 包标识，URDF 里写 `package://rus_sim_driver/…` 而文件实际放在 `fairino3_v6/` 是常态（本仓库自带模型就是一例），包名在磁盘上不携带可用信息；
+3. **相对路径** → 依次尝试两个根，先命中者胜：
+   - `AssetDirectory`（构造时指定，即 MuJoCo `meshdir` 的等价物）—— **优先**；
+   - `baseDirectory`（URDF 文件自身所在目录）—— **默认**；
+   - 两者都没有（`Parse` 未给 `baseDirectory` 且未配 `AssetDirectory`）→ 退回当前工作目录；
+4. **每个根都不存在** → 抛 `FileNotFoundException`，消息中**列出所有尝试过的路径**并提示配置 `AssetDirectory`；绝不静默跳过。
 
 ```csharp
-public static string? UrdfLocator.Find(string? argument, params string?[]? extraSearchRoots);
-```
+// 默认：资源与 URDF 同级（本仓库测试数据的布局，无需任何额外参数）
+var robot = RobotModel.ParseFile("Assets/Models/fairino3_v6/fairino3_v6.urdf");
 
-在 `AppContext.BaseDirectory`、当前目录及额外搜索根下，按 `Assets/Models`（各宿主测试拷到自己可执行文件旁的目录）逐个递归查找；`argument` 若为存在的文件路径则直接返回（绝对化）。
+// 标准 ROS 布局：包根/{urdf/robot.urdf, meshes/…} —— 用 assetDirectory 指向包根即可
+var robot2 = RobotModel.ParseFile("pkg/urdf/robot.urdf", assetDirectory: "pkg");
+```
 
 ---
 
@@ -159,6 +175,6 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 6. 可见性
 
-- **public（用户面）**: `RobotModel`、`IAssetResolver`、`FileSystemAssetResolver`、`UrdfLocator`、`UrdfParseException`、全部 `Description` 数据模型、`RobotState`。
+- **public（用户面）**: `RobotModel`、`IAssetResolver`、`FileSystemAssetResolver`（含 `AssetDirectory` 属性与构造参数——资源根入口）、`UrdfParseException`、全部 `Description` 数据模型、`RobotState`。
 - **internal（实现细节）**: `UrdfParser`——用户只通过 `RobotModel.Parse/ParseFile` 进入。
 - Robot 层不再出现任何渲染/GL 资源；`RobotModel` 构建只产出 CPU 数据（`MeshData`/`MaterialData`），GPU 实例化统一由渲染后端在渲染线程完成。

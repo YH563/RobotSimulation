@@ -10,7 +10,10 @@ namespace RobotSimulation.Core.Geometry;
 /// </summary>
 public readonly struct Ray
 {
+    /// <summary>Ray origin (world coordinates).</summary>
     public Vector3 Origin { get; }
+
+    /// <summary>Unit-length direction, always normalized by the constructor.</summary>
     public Vector3 Direction { get; }
 
     /// <param name="origin">Ray origin (world coordinates).</param>

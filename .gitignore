@@ -2,3 +2,7 @@
 **/bin
 **/obj
 .VSCodeCounter/
+*.nupkg
+*.snupkg
+artifacts/
+*.DotSettings.user

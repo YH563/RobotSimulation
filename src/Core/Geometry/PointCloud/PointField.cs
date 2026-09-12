@@ -22,6 +22,13 @@ public sealed class PointField
     /// <summary>Number of elements of <see cref="DataType"/> the field holds per point.</summary>
     public int Count { get; }
 
+    /// <summary>Creates one channel description.</summary>
+    /// <param name="name">Channel name, e.g. <c>x</c>, <c>rgb</c>, <c>intensity</c>.</param>
+    /// <param name="offset">Byte offset of the field inside each point.</param>
+    /// <param name="dataType">Type of one element.</param>
+    /// <param name="count">Number of elements of that type per point.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is negative or <paramref name="count"/> is below 1.</exception>
     public PointField(string name, int offset, PointFieldDataType dataType, int count = 1)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));

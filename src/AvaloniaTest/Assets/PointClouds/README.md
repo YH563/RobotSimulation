@@ -1,9 +1,10 @@
 # Test point clouds (`Assets/PointClouds`)
 
-The point clouds that **every** run of this host test loads (see the table at the top of
-`src/BareWindowTest/Program.cs` and its twin in the Avalonia host's `RobotViewportControl.cs`). Both
-files are **generated, not downloaded**, so a CI run never has to fetch anything: they are ~100 KB each,
-and their colour layout is the whole point of the test.
+Ready-to-use point-cloud samples for this host test. The minimal hosts load a single URDF and **no** point
+cloud, so these files are here for when you want to exercise `PointCloudIo` / `PointCloud2Data`:
+`PointCloud.FromFile(path)` and then `scene.Add(...)`. Both files are **generated, not downloaded**, so a
+run never has to fetch anything: they are ~100 KB each, and their colour layout is the whole point of the
+sample.
 
 | File | Container | Colour channel | Shape |
 | --- | --- | --- | --- |
@@ -21,10 +22,10 @@ python3 docs/testing/tools/gencloud.py \
 
 A cloud whose colour channels are ignored — or decoded with the wrong byte order, or packed as 0..1
 instead of 0..255 — still renders fine; it just renders the material colour, or black. A screenshot
-cannot tell those apart, so each host logs the point count **and the decoded first point colour**
-(`Loading point cloud: … (2904 points, color: first point rgba(1.00, 0.16, 0.16))`), which is what a CI
-script compares. The two shapes are deliberate too: six flat faces and a smooth hue sweep make a
-mis-decoded colour obvious to the eye.
+cannot tell those apart, so the check has to read the **decoded result** back: on the object returned by
+`PointCloud.FromFile(...)`, `PointData` gives the point count and the first point's colour (e.g. 2904
+points, `rgba(1.00, 0.16, 0.16)`). The two shapes are deliberate too: six flat faces and a smooth hue
+sweep make a mis-decoded colour obvious to the eye.
 
 ## What the loader accepts
 

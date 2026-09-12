@@ -34,6 +34,20 @@ public sealed class PointCloud2Data
     private float _intensityMin, _intensityMax;
     private bool _intensityRangeValid;
 
+    /// <summary>
+    /// Wraps an already-decoded, layout-described point cloud (the in-memory form of a
+    /// <c>sensor_msgs/PointCloud2</c> message). Channels referenced by name (x/y/z, rgb or
+    /// red/green/blue, intensity) are resolved and validated once, here.
+    /// </summary>
+    /// <param name="fields">Channel descriptions, in declaration order.</param>
+    /// <param name="data">Raw point bytes (one point per <paramref name="pointStep"/> bytes).</param>
+    /// <param name="pointStep">Bytes per point.</param>
+    /// <param name="frameId">Optional source/coordinate frame identifier.</param>
+    /// <param name="width">Number of points per row; 0 derives it from the byte length.</param>
+    /// <param name="height">Number of rows; 1 means an unstructured cloud.</param>
+    /// <exception cref="ArgumentException"><paramref name="data"/>'s length is not a multiple of <paramref name="pointStep"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pointStep"/> is not positive.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="fields"/> or <paramref name="data"/> is null.</exception>
     public PointCloud2Data(PointField[] fields, byte[] data, int pointStep,
         string? frameId = null, int width = 0, int height = 1)
     {

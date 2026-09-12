@@ -14,6 +14,9 @@ public class Camera : GameObject
 {
     // Yaw angle (degrees), i.e. the horizontal rotation; any float, usually kept in [-360, 360].
     private float _yaw = -90f;
+    /// <summary>
+    /// Horizontal orbit angle in degrees; wraps freely (the default -90° looks along +Y).
+    /// </summary>
     public float Yaw
     {
         get => _yaw;
@@ -22,6 +25,9 @@ public class Camera : GameObject
 
     // Pitch angle (degrees), i.e. the vertical rotation. Clamped to [-89, 89] to prevent flipping.
     private float _pitch = 20f;
+    /// <summary>
+    /// Vertical orbit angle in degrees; clamped to [-89, 89] so the view can never flip over the pole.
+    /// </summary>
     public float Pitch
     {
         get => _pitch;
@@ -34,6 +40,10 @@ public class Camera : GameObject
 
     // Distance between the camera and the target.
     private float _distance = 5f;
+    /// <summary>
+    /// Distance from the camera to <see cref="Target"/> (clamped to [0.5, 200]); changing it is what
+    /// <see cref="Zoom"/> does.
+    /// </summary>
     public float Distance
     {
         get => _distance;
@@ -46,6 +56,9 @@ public class Camera : GameObject
 
     // The look-at target (world coordinates).
     private Vector3 _target = Vector3.Zero;
+    /// <summary>
+    /// Point the camera orbits around and looks at (world coordinates); <see cref="Pan"/> moves it.
+    /// </summary>
     public Vector3 Target
     {
         get => _target;
@@ -53,20 +66,35 @@ public class Camera : GameObject
     }
 
     // Camera position.
+    /// <summary>
+    /// Camera position in world coordinates: derived from <see cref="Target"/>/<see cref="Yaw"/>/
+    /// <see cref="Pitch"/>/<see cref="Distance"/>, so it is read-only from outside.
+    /// </summary>
     public Vector3 Position { get; private set; }
 
     // Field of view (degrees), default 45°. Controls the perspective projection's view width.
+    /// <summary>
+    /// Vertical field of view in degrees (default 45); widens the perspective projection.
+    /// </summary>
     public float Fov { get; set; } = 45f;
 
     // Screen aspect ratio (Width/Height), used for the projection matrix.
+    /// <summary>
+    /// Viewport aspect ratio (Width/Height), fed into the projection matrix; the host refreshes it on
+    /// every resize.
+    /// </summary>
     public float AspectRatio { get; set; } = 1.6f;
 
     // Near clip plane distance, default 0.1.
+    /// <summary>Near clip plane distance (default 0.1); geometry closer than this is clipped away.</summary>
     public float NearPlane { get; set; } = 0.1f;
 
     // Far clip plane distance, default 100.
+    /// <summary>Far clip plane distance (default 100); geometry beyond this is clipped away.</summary>
     public float FarPlane { get; set; } = 100f;
 
+    /// <summary>Creates the camera and computes its initial pose from the default orbit state.</summary>
+    /// <param name="name">Scene object name (defaults to <c>Camera</c>).</param>
     public Camera(string? name = "Camera") : base(null, null, name)
     {
         UpdateCamera(); // Compute initial position.

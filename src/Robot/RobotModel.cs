@@ -37,6 +37,10 @@ public sealed class RobotModel : GameObject
     private readonly RobotDescription _description;
     private readonly IAssetResolver? _resolver;
 
+    // Used for every mesh/texture lookup. Never null: it is the caller's resolver when one was supplied,
+    // otherwise the default filesystem resolver bound to the caller's asset directory.
+    private readonly IAssetResolver _effectiveResolver;
+
     // Drivable joint bindings (in RobotDescription.Joints order).
     private readonly List<Joint> _drivableJoints = new();
     private readonly Dictionary<string, int> _drivableIndexByName = new(StringComparer.Ordinal);
@@ -55,17 +59,39 @@ public sealed class RobotModel : GameObject
     /// </summary>
     /// <param name="description">The robot static description (URDF/SDF/custom parse result).</param>
     /// <param name="resolver">Asset path resolver (mesh/texture); null uses the default filesystem implementation.</param>
-    public RobotModel(RobotDescription description, IAssetResolver? resolver = null)
+    /// <param name="assetDirectory">
+    /// Extra directory searched for mesh/texture files before the URDF file's own directory (MuJoCo's
+    /// <c>meshdir</c> idea); null keeps the default "next to the URDF" search. Only valid together with a null
+    /// <paramref name="resolver"/> — see <see cref="RequireNoAssetDirectoryConflict"/>.
+    /// </param>
+    /// <exception cref="ArgumentException">A custom <paramref name="resolver"/> was combined with an <paramref name="assetDirectory"/>.</exception>
+    public RobotModel(RobotDescription description, IAssetResolver? resolver = null, string? assetDirectory = null)
         : base(null, null, RequireSingleRoot(description))
     {
+        RequireNoAssetDirectoryConflict(resolver, assetDirectory);
         _description = description;
         _resolver = resolver;
+        _effectiveResolver = resolver ?? new FileSystemAssetResolver(assetDirectory);
         RobotName = description.Name ?? string.Empty;
         BuildTree();
         LockTree(); // Lock the whole subtree after construction: child-link poses can only change via RobotModel's built-in interface.
         // Not highlighted by default. Highlighting is pure click feedback, set by the host on a mouse hit
         // via SceneGraph.PickAndHighlight. To highlight the whole tree by default, call
         // SetSubtreeHighlight(this) manually (kept here for developers).
+    }
+
+    /// <summary>
+    /// Guards the one contradictory combination: a caller-supplied resolver already owns asset lookup, so an
+    /// <paramref name="assetDirectory"/> next to it could only be silently ignored. Fail loudly instead.
+    /// </summary>
+    private static void RequireNoAssetDirectoryConflict(IAssetResolver? resolver, string? assetDirectory)
+    {
+        if (resolver is not null && !string.IsNullOrWhiteSpace(assetDirectory))
+            throw new ArgumentException(
+                "assetDirectory cannot be combined with a custom IAssetResolver: the resolver decides where " +
+                "assets are looked up. Pass either assetDirectory (uses FileSystemAssetResolver) or a resolver " +
+                "configured with your own search root.",
+                nameof(assetDirectory));
     }
 
     /// <summary>Validates the description is non-null and has exactly one root link, returning that root link name (this GameObject's Name).</summary>
@@ -89,8 +115,13 @@ public sealed class RobotModel : GameObject
     /// <param name="urdfXml">URDF source text.</param>
     /// <param name="baseDirectory">Base directory for relative resource paths; may be null.</param>
     /// <param name="resolver">Asset path resolver (mesh/texture); may be null.</param>
+    /// <param name="assetDirectory">
+    /// Extra directory searched for mesh/texture files before <paramref name="baseDirectory"/> (MuJoCo's
+    /// <c>meshdir</c> idea); null keeps the default "next to the URDF" search.
+    /// </param>
     /// <exception cref="UrdfParseException">Thrown when the XML or URDF semantics are invalid.</exception>
-    public static RobotModel Parse(string urdfXml, string? baseDirectory = null, IAssetResolver? resolver = null)
+    public static RobotModel Parse(string urdfXml, string? baseDirectory = null,
+        IAssetResolver? resolver = null, string? assetDirectory = null)
     {
         if (urdfXml is null)
             throw new UrdfParseException("URDF text is null.");
@@ -106,20 +137,27 @@ public sealed class RobotModel : GameObject
         }
 
         RobotDescription description = new UrdfParser().Parse(document, baseDirectory);
-        return new RobotModel(description, resolver);
+        return new RobotModel(description, resolver, assetDirectory);
     }
 
     /// <summary>Reads a URDF file and builds the complete robot tree; the file's directory is automatically the base for relative resource paths.</summary>
+    /// <param name="path">Path of the URDF file to read.</param>
+    /// <param name="resolver">Asset path resolver (mesh/texture); may be null.</param>
+    /// <param name="assetDirectory">
+    /// Extra directory searched for mesh/texture files before the URDF file's own directory (MuJoCo's
+    /// <c>meshdir</c> idea) — the way to load a URDF that keeps its meshes outside its own folder; null keeps
+    /// the default "next to the URDF" search.
+    /// </param>
     /// <exception cref="UrdfParseException">Thrown when parsing fails.</exception>
     /// <exception cref="FileNotFoundException">Thrown when the file does not exist.</exception>
-    public static RobotModel ParseFile(string path, IAssetResolver? resolver = null)
+    public static RobotModel ParseFile(string path, IAssetResolver? resolver = null, string? assetDirectory = null)
     {
         string fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath))
             throw new FileNotFoundException($"URDF file not found: {fullPath}", fullPath);
 
         string xml = File.ReadAllText(fullPath);
-        return Parse(xml, Path.GetDirectoryName(fullPath), resolver);
+        return Parse(xml, Path.GetDirectoryName(fullPath), resolver, assetDirectory);
     }
 
     // ------------------------------------------------------------------
@@ -135,7 +173,10 @@ public sealed class RobotModel : GameObject
     /// </summary>
     public string RobotName { get; }
 
-    /// <summary>The asset path resolver (used when importing meshes/textures).</summary>
+    /// <summary>
+    /// The caller-supplied asset path resolver, or null when the default <see cref="FileSystemAssetResolver"/>
+    /// performs the lookups (itself bound to the <c>assetDirectory</c> given to the factory, if any).
+    /// </summary>
     public IAssetResolver? AssetResolver => _resolver;
 
     /// <summary>Creates a headless pure-state object (no scene/render dependency): joint values + FK.</summary>
@@ -316,7 +357,7 @@ public sealed class RobotModel : GameObject
     private IReadOnlyList<GameObject> LoadMeshVisual(string linkName, int index, VisualElement visual,
         MeshGeometry mesh)
     {
-        IAssetResolver resolver = _resolver ?? new FileSystemAssetResolver();
+        IAssetResolver resolver = _effectiveResolver;
         string path = resolver.Resolve(mesh.Uri, _description.SourceBaseDirectory)
                       ?? throw new FileNotFoundException(
                           $"Cannot resolve mesh asset '{mesh.Uri}' (link '{linkName}' visual#{index}). Check the URDF path.",
@@ -359,7 +400,7 @@ public sealed class RobotModel : GameObject
             fileMaterial.BaseColor = color;
         if (urdf?.TextureFile is { } textureFile)
         {
-            IAssetResolver resolver = _resolver ?? new FileSystemAssetResolver();
+            IAssetResolver resolver = _effectiveResolver;
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } texturePath)
                 fileMaterial.AlbedoTexture = TextureReference.FromFile(texturePath);
         }
@@ -390,7 +431,7 @@ public sealed class RobotModel : GameObject
         };
         if (material?.TextureFile is { } textureFile)
         {
-            IAssetResolver resolver = _resolver ?? new FileSystemAssetResolver();
+            IAssetResolver resolver = _effectiveResolver;
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } path)
                 data.AlbedoTexture = TextureReference.FromFile(path);
         }

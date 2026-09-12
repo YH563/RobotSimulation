@@ -56,7 +56,7 @@ This document describes the architecture from the perspective of *publishable Nu
 
 | Package | Public responsibility | Depends on |
 |---|---|---|
-| `Core` | Scene object model, pure-CPU data, render abstraction interfaces, point-cloud/model import, utils | `AssimpNet`, `Microsoft.Extensions.Logging` (`Logger`) |
+| `Core` | Scene object model, pure-CPU data, render abstraction interfaces, point-cloud/model import, utils | `Silk.NET.Assimp`, `Microsoft.Extensions.Logging` (`Logger`) |
 | `Robot` | Robot description / URDF / headless FK / `RobotModel` tree | `Core` |
 | `OpenGL` | Only render backend (device layer + renderer + GPU resources + shaders) | `Core` |
 
@@ -65,7 +65,7 @@ This document describes the architecture from the perspective of *publishable Nu
 1. `Core` must not reference `Robot`, `OpenGL`, or any UI framework type.
 2. `Robot` references only `Core` (CPU data like `MeshData` / `MaterialData` / `Scene`) and plain `System.Numerics`.
 3. All `Silk.NET.*` / `StbImageSharp` appear only in `OpenGL` (and the host tests' window/input), never in public signatures.
-4. `AssimpNet` is a native (non-managed) dependency of `Core`'s model import; it means the `Core` package ships native assets — to keep a "pure-managed light kernel", consider moving import into a sub-package (see section 7).
+4. `Silk.NET.Assimp` is a native (non-managed) dependency of `Core`'s model import; it means the `Core` package ships native assets (distributed per RID, with nothing for a host to bootstrap) — to keep a "pure-managed light kernel", consider moving import into a sub-package (see section 7).
 
 > Dependency note: `Core`'s `Logger` (`Utils`) uses the full `Microsoft.Extensions.Logging` (it calls `LoggerFactory` internally), not just `Abstractions`.
 
@@ -75,19 +75,28 @@ This document describes the architecture from the perspective of *publishable Nu
 
 **`Core/`**
 ```text
-Scene/       GameObject, Transform, SceneGraph, Camera, Light, primitives (GameObject subclasses)
-Geometry/    Primitives(internal), Raycast/Bounds/Intersect, PointCloud2Data/PointCloudIo,
-             Import/ (AssimpModelLoader, LoadOptions, LoadedModel, AssimpNative)
-Rendering/   IRenderContext, IRenderer, MaterialData, TextureReference/TextureColorSpace, RenderPassKind
-Utils/       GameTimer, Logger, MathUtils
+Scene/          framework kernel: GameObject, Transform, SceneGraph, Camera, Light, RaycastHit
+  Primitives/     ready-made nodes: Box/Sphere/Cylinder/Capsule/GroundPlane/Arrow/Axes/Grid/Curve/PointCloud
+  Behaviors/      per-frame logic injection: IUpdateBehavior, DelegateUpdateBehavior
+Geometry/       pure CPU geometry: MeshData/LineData/VertexLayout, Primitives(internal), Ray/Raycast/Bounds
+  PointCloud/     point cloud: PointCloud2Data, PointField, PointFieldDataType, PointCloudIo
+  Import/         Assimp import: AssimpModelLoader, LoadOptions, LoadedModel
+Rendering/      render abstraction: IRenderContext, IRenderer, MaterialData, TextureReference(+TextureColorSpace),
+                RenderPassKind, FrameStats, GraphicsDeviceInfo
+Utils/          GameTimer, Logger, MathUtils
 ```
+
+> Folders and namespaces are **deliberately decoupled** (ADR-020): a folder may be finer than its namespace, but
+> `namespace` is **never** changed because of a folder move. For example `Scene/Primitives/Box.cs` still lives in
+> `RobotSimulation.Core.Scene`. Reorganizing folders has zero impact on consumers; the root `.editorconfig` locks
+> this in with `dotnet_style_namespace_match_folder = false`.
 
 **`Robot/`**
 ```text
 Description/ RobotDescription, Link/Visual/Geometry/Joint pure data; GeometryDescription
-Urdf/        UrdfParser(internal), IAssetResolver/FileSystemAssetResolver, UrdfLocator, UrdfParseException
+Urdf/        UrdfParser(internal), IAssetResolver/FileSystemAssetResolver, UrdfParseException
 State/       RobotState (headless FK)
-Model/       RobotModel (GameObject root + factories/drivers)
+(root)       RobotModel (GameObject root + factories/drivers)
 ```
 
 **`OpenGL/`**
@@ -122,6 +131,9 @@ Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag (packed as embedded resour
 | ADR-016 | `RobotState` and `RobotModel` are separate: the former is pure headless FK, the latter drives the visual tree | both share one `RobotDescription` |
 | ADR-017 | The shader pipeline ships as built-in backend resources (`EmbeddedShaders`); `Core` only defines `RenderPassKind` | extend/replace shading like a game engine, without a full engine |
 | ADR-018 | The composition root (host) provides `GL`; the backend delivers via interfaces; the host holds interfaces + viewport size | the host is wholesale swappable (bare window / WPF / Avalonia) |
+| ADR-019 | Per-frame logic on `GameObject` switched to **composition injection**: a node carries an `IUpdateBehavior` list and `GameObject.Update` becomes a non-virtual dispatcher | logic can be added/removed, paused, and unit-tested at runtime; `sealed` and parsed nodes extend without a subclass |
+| ADR-020 | Folders and namespaces are deliberately decoupled: a folder may be finer than its namespace, and reorganizing folders **never** changes `namespace` (locked by `.editorconfig` disabling IDE0130) | protects the public API contract; folders are internal organization only |
+| ADR-021 | URDF asset lookup became a **root fallback chain**: explicit `assetDirectory` first, the URDF's sibling directory second; a `package://` **package name is always discarded** | replaces heuristic guessing with an explicit asset root (`assetDirectory` = MuJoCo's `meshdir`); the standard ROS `urdf/`+`meshes/` layout now loads without editing the URDF |
 
 ---
 
@@ -156,7 +168,7 @@ render loop:                        renderer.Render(scene)
 | `IRenderContext` / `IRenderer` | `Core.Rendering` | swap render backend without touching core/domain |
 | `IAssetResolver` | `Robot.Urdf` | custom URDF mesh/texture reference resolution (default `FileSystemAssetResolver`) |
 | `RobotModel(RobotDescription, ...)` ctor | `Robot` | any description source (SDF/custom) → robot tree |
-| `GameObject.Update` virtual | `Core.Scene` | per-frame update logic (trajectory, animation) |
+| `IUpdateBehavior` / `GameObject.AddUpdate` | `Core.Scene` | inject per-frame logic (trajectory, animation) without a subclass; class-based logic via `AddBehavior<T>` |
 | `GameObject.Pickable` / pick `predicate` | `Core.Scene` | participate/filter picking |
 | `EmbeddedShaders` / `ShaderProgram` | `OpenGL.Resources` | custom/replace GLSL pipeline (model/line/point-cloud/axes) |
 
@@ -165,10 +177,10 @@ render loop:                        renderer.Render(scene)
 ## 7. Packaging & Evolution
 
 1. **Current**: single repo + namespace partitioning; `src/{Core,Robot,OpenGL}` are the future assembly/package boundaries.
-2. **After API stabilizes**: mechanically split into multiple assemblies / NuGet packages per the `core`/`robot`/`opengl` API docs; fill in `PackageId` / `Version` / `readme` metadata.
+2. **After API stabilizes**: mechanically split into multiple assemblies / NuGet packages per the `core`/`robot`/`opengl` API docs; fill in `PackageId` / `Version` / `readme` metadata. **Already in place**: all three library projects (`Core` / `OpenGL` / `Robot`) set `<GenerateDocumentationFile>`, so `CS1591` (missing XML comment on a public member) is reported by every build and is kept at zero, and `RobotSimulation.*.xml` is emitted alongside each assembly — a package therefore carries its IntelliSense docs automatically.
 3. **Data ingestion**: first wire an external write protocol (Sink) in-process; ROS2 bridge as a separate optional project.
-4. **Test hosts (three host projects)**: bare window, WPF, Avalonia — each with a `RobotViewport`-style control. They prove that the library **can render standalone** in different desktop frameworks and gather relevant tests, as verification only (not published). They share the same `Core`/`Robot`/`OpenGL` chain; the only host difference is "how to obtain `GL` and how to sync the viewport". **Done so far**: `src/BareWindowTest` (no UI framework at all; also the automated smoke test, `--smoke [frames]` → exit code 0/1) and `src/AvaloniaTest` (`RobotViewportControl : OpenGlControlBase`, obtaining `GL` through `GL.GetApi(gl.GetProcAddress)` and drawing into Avalonia's per-control framebuffer); WPF is still pending. Both take the same CLI shape — `--smoke [frames]`, and nothing else — and load the test data named in their own source from their own `Assets/` tree (URDF models, meshes, point clouds), which each project file copies next to its executable. Their console output is therefore line-by-line comparable, which turns the two hosts into a cross-check of each other instead of two separate demos.
-5. **Optional**: to keep a "pure-managed light kernel", move `AssimpNet` into a standalone import sub-package.
+4. **Test hosts (three host projects)**: bare window, WPF, Avalonia — each with a `RobotViewport`-style control. They prove that the library **can render standalone** in different desktop frameworks and gather relevant tests, as verification only (not published). They share the same `Core`/`Robot`/`OpenGL` chain; the only host difference is "how to obtain `GL` and how to sync the viewport". **Done so far**: `src/BareWindowTest` (no UI framework at all; also the automated smoke test, `--smoke [frames]` → exit code 0/1) and `src/AvaloniaTest` (`RobotViewportControl : OpenGlControlBase`, obtaining `GL` through `GL.GetApi(gl.GetProcAddress)` and drawing into Avalonia's per-control framebuffer); WPF is still pending. Both take the same CLI shape — `--smoke [frames]`, and nothing else. The scene content is deliberately minimal: one URDF robot (`fairino3_v6`), the camera left exactly as `SceneGraph`'s constructor poses it, and a window that offers nothing but orbit and pick-to-highlight — so they are both an end-to-end check and a minimal embedding example to copy. The loaded file name sits in a single constant in each host's source, under that project's own `Assets/` tree, which each project file copies next to its executable. Their console output is therefore line-by-line comparable, which turns the two hosts into a cross-check of each other instead of two separate demos; for swapping in another model (the `Assets/` trees also ship built-in geometry, a community package, all five mesh formats and point-cloud samples) see `docs/testing`.
+5. **Optional**: to keep a "pure-managed light kernel", move `Silk.NET.Assimp` into a standalone import sub-package.
 
 ---
 

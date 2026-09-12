@@ -274,6 +274,10 @@ public class SceneGraph : IDisposable
             UpdateRecursive(child.Owner, deltaTime);
     }
 
+    /// <summary>
+    /// Drops the scene's node and light lists. GPU resources are owned by the renderer
+    /// (<c>RobotSimulation.OpenGL.Renderer</c>), so nothing here touches OpenGL; the call is idempotent.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;

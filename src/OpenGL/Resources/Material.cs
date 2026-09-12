@@ -8,9 +8,16 @@ namespace RobotSimulation.OpenGL.Resources;
 /// <summary>Texture type.</summary>
 public enum TextureType
 {
+    /// <summary>Base color / diffuse map (sRGB).</summary>
     Albedo,
+
+    /// <summary>Tangent-space normal map (linear).</summary>
     Normal,
+
+    /// <summary>Metallic map (linear).</summary>
     Metallic,
+
+    /// <summary>Roughness map (linear).</summary>
     Roughness
 }
 
@@ -27,8 +34,11 @@ public class Material : IDisposable
     private readonly Dictionary<TextureType, Texture2D> _textures = new();
     private bool _disposed = false;
 
+    /// <summary>Shader program shared by every draw call that uses this material (owned by the caller, not disposed here).</summary>
     public ShaderProgram Shader { get; }
 
+    /// <summary>Wraps an already-compiled shader program.</summary>
+    /// <param name="shader">The program this material draws with.</param>
     public Material(ShaderProgram shader)
     {
         Shader = shader;
@@ -88,6 +98,7 @@ public class Material : IDisposable
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
     };
 
+    /// <summary>Disposes every texture this material owns (the shader is not disposed here); safe to call more than once.</summary>
     public void Dispose()
     {
         if (_disposed) return;

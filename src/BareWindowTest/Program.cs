@@ -2,12 +2,10 @@ using System.IO;
 using System.Numerics;
 using Microsoft.Extensions.Logging;
 using RobotSimulation.Core.Geometry;
-using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Scene;
 using RobotSimulation.Core.Utils;
 using RobotSimulation.OpenGL.Device;
-using RobotSimulation.OpenGL.Rendering;
 using RobotSimulation.Robot;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -23,15 +21,16 @@ namespace BareWindowTest;
 /// <code>
 ///   BareWindowTest [--smoke [frames]]
 /// </code>
-/// All test data comes from this project's own <c>Assets</c> folder, which the project file copies
-/// next to the executable; the relative paths are written into the source (see
-/// <see cref="ModelRelativePaths"/>) instead of being passed on the command line, so what a run loads
-/// is described entirely by the code and two hosts can be compared line by line. A single run loads
-/// every kind of test data at once — URDF built-in geometry, a community URDF package, a real robot,
-/// every supported mesh format, and RGB point clouds.
-/// The window is interactive exactly like the Avalonia host: left-drag orbits the camera, middle-drag
-/// pans, right-drag or the wheel zooms, and a click (press + release without moving) picks and highlights
-/// the object under the cursor. Same sensitivities, same wiring rules, same log wording as that host.
+/// Its behaviour is the library's whole feature set in miniature, and deliberately nothing more:
+/// create a scene, load one URDF robot into it, then let the user orbit the camera (left-drag rotate,
+/// middle-drag pan, right-drag or the wheel zoom) and pick (a click — press + release without moving —
+/// highlights the link under the cursor). The camera pose is never written here:
+/// <see cref="SceneGraph"/>'s constructor already assembles a usable default scene and camera, which is
+/// exactly the behaviour an embedder should be able to rely on.
+/// The loaded file is named in the source (see <see cref="ModelRelativePath"/>) instead of being passed
+/// on the command line, so what a run loads is described entirely by the code and the two hosts can be
+/// compared line by line; it lives in this project's own <c>Assets</c> folder, which the project file
+/// copies next to the executable.
 /// In smoke mode it renders the given number of frames (default 120) and then exits with code 0 on
 /// success or 1 on failure, so CI can watch the process exit code instead of a human looking at pixels.
 /// The host difference against the Avalonia host is only "how to get <c>GL</c> and how to sync the
@@ -44,49 +43,22 @@ public static class Program
     // ------------------------------------------------------------------
     // Test data (edit only this block)
     //
-    // Paths are relative to this project's Assets folder and use '/' so they read the same on every
-    // platform; they are resolved against AppContext.BaseDirectory, where the build copied the folder.
-    // Every entry is loaded by every run, so one smoke run covers all of it:
-    //   * URDF built-in geometry    — primitives.urdf (box / sphere / cylinder / capsule)
-    //   * community URDF package    — urdf_tutorial (the ROS tutorial package, DAE + STL-less meshes)
-    //   * a real robot              — fairino3_v6 (URDF + STL meshes)
-    //   * every mesh format         — formats.urdf (STL / OBJ+MTL / DAE / glTF / PLY in one tree)
-    //   * RGB point clouds          — a PLY with red/green/blue channels and a PCD with packed rgb
-    // See Assets/Models/README.md and Assets/PointClouds/README.md for where the files come from.
+    // The path is relative to this project's Assets folder and uses '/' so it reads the same on every
+    // platform; it is resolved against AppContext.BaseDirectory, where the build copied the folder.
+    // A single URDF is enough to take the whole pipeline end to end — XML parsing, package:// asset
+    // resolution, STL import, the link/joint tree and its materials — while keeping the host readable:
+    //   * a real 6-axis robot — fairino3_v6 (URDF + 7 STL meshes)
+    // See Assets/Models/README.md for where the file comes from.
     // ------------------------------------------------------------------
 
-    /// <summary>Folder copied next to the executable that holds all test data.</summary>
+    /// <summary>Folder copied next to the executable that holds the test data.</summary>
     private const string AssetsRelativePath = "Assets";
 
-    /// <summary>URDF models loaded by every run, in load order, relative to <see cref="AssetsRelativePath"/>.</summary>
-    private static readonly string[] ModelRelativePaths =
-    {
-        "Models/primitives.urdf",                      // URDF built-in geometry
-        "Models/urdf_tutorial/02-multipleshapes.urdf", // community package (ROS urdf_tutorial)
-        "Models/urdf_tutorial/05-visual.urdf",         // community package, DAE meshes + textures
-        "Models/fairino3_v6/fairino3_v6.urdf",         // a real 6-axis robot (STL meshes)
-        "Models/formats/formats.urdf",                 // STL / OBJ+MTL / DAE / glTF / PLY
-    };
-
-    /// <summary>Point clouds loaded by every run, in load order, relative to <see cref="AssetsRelativePath"/>.</summary>
-    private static readonly string[] PointCloudRelativePaths =
-    {
-        "PointClouds/rgb_cloud.ply", // PLY ascii, separate red/green/blue channels
-        "PointClouds/rgb_cloud.pcd", // PCD ascii, packed rgb channel
-    };
-
-    /// <summary>Horizontal distance between the loaded models, so the whole data set is visible at once.</summary>
-    private const float ModelSpacing = 2.0f;
-
-    /// <summary>Point clouds float above the models at this height, this far apart.</summary>
-    private const float CloudHeight = 1.8f;
-    private const float CloudSpacing = 2.5f;
+    /// <summary>The one URDF model every run loads, relative to <see cref="AssetsRelativePath"/>.</summary>
+    private const string ModelRelativePath = "Models/fairino3_v6/fairino3_v6.urdf";
 
     /// <summary>Frames rendered by <c>--smoke</c> when no count is given.</summary>
     private const int DefaultSmokeFrames = 120;
-
-    /// <summary>Rotation speed of the demo box (degrees per second), used only to prove the frame loop runs.</summary>
-    private const double SpinDegreesPerSecond = 45.0;
 
     /// <summary>How often the frame-rate interface is reported to the console (seconds).</summary>
     private const double StatsIntervalSeconds = 1.0;
@@ -107,9 +79,15 @@ public static class Program
     private static IRenderContext _graphics = null!;
     private static IRenderer _renderer = null!;
     private static SceneGraph _scene = null!;
-    private static GameObject? _spinner;
 
-    private static double _spinDegrees;
+    /// <summary>The currently picked object (single selection: a new pick replaces it, a miss clears it).</summary>
+    private static GameObject? _selected;
+
+    // Smoke mode: > 0 means "render this many frames, then close the window".
+    private static long _framesToRender = -1;
+    private static long _framesRendered;
+    private static bool _failed;
+
     private static double _statsAccumulator;
 
     // Pointer state: the button that started the current drag (null when idle), whether the pointer has
@@ -120,19 +98,10 @@ public static class Program
     private static Vector2 _pressPosition;
     private static Vector2 _lastPosition;
 
-    /// <summary>The currently picked object (single selection: a new pick replaces it, a miss clears it).</summary>
-    private static GameObject? _selected;
-
-    // Smoke mode: > 0 means "render this many frames, then close the window".
-    private static long _framesToRender = -1;
-    private static long _framesRendered;
-    private static bool _failed;
-
     public static int Main(string[] args)
     {
-        // Prepare the Assimp native runtime before any mesh import; the Core library attaches no
-        // logging providers itself, so the host owns the destinations.
-        AssimpNative.EnsureRuntime();
+        // The Core library attaches no logging providers itself, so the host owns the destinations. Mesh
+        // import needs no runtime preparation: the Assimp native library ships per-RID with the bindings.
         Logger.Initialize(builder => builder.AddSimpleConsole());
 
         ParseArguments(args);
@@ -173,9 +142,9 @@ public static class Program
     }
 
     /// <summary>
-    /// <c>--smoke [frames]</c> switches to the CI smoke mode; there is no other switch. Which files are
-    /// loaded is a property of the code (see <see cref="ModelRelativePaths"/>), not of the command line,
-    /// so a run can never silently test something other than the checked-in data set. Unknown arguments
+    /// <c>--smoke [frames]</c> switches to the CI smoke mode; there is no other switch. Which file is
+    /// loaded is a property of the code (see <see cref="ModelRelativePath"/>), not of the command line,
+    /// so a run can never silently test something other than the checked-in data. Unknown arguments
     /// are reported and ignored instead of changing what is loaded.
     /// </summary>
     private static void ParseArguments(string[] args)
@@ -209,18 +178,14 @@ public static class Program
         Logger.Info($"GPU: {gpu.Renderer} | vendor: {gpu.Vendor} | GL: {gpu.ApiVersion} | GLSL: {gpu.ShaderVersion}");
 
         // The default environment (grid floor / lights / world axes / camera pose) is assembled by the
-        // SceneGraph constructor, so a bare window already shows a usable scene.
+        // SceneGraph constructor, so a bare window already shows a usable scene. The camera is left as
+        // it comes: the default pose frames a single table-top-sized robot well, and overriding it here
+        // would only hide what the library already does for a new embedder.
         _scene = new SceneGraph();
         _graphics.Resized += (width, height) => _scene.Camera.AspectRatio = width / (float)height;
         _graphics.Resize(_window.Size.X, _window.Size.Y);
 
-        // Camera: pulled back far enough that the whole test data set — models spread along X, point
-        // clouds floating above them — is inside the frame from the very first frame.
-        _scene.Camera.Target = new Vector3(0f, 0.9f, 0f);
-        _scene.Camera.Distance = 13f;
-
-        // Loads the whole test data set and hands back the object the frame loop animates.
-        _spinner = LoadTestData(_scene);
+        LoadRobot(_scene);
 
         _input = _window.CreateInput();
         foreach (IKeyboard keyboard in _input.Keyboards)
@@ -239,60 +204,28 @@ public static class Program
     }
 
     /// <summary>
-    /// Loads the test data listed at the top of this file into <paramref name="scene"/> and returns the
-    /// object the frame loop animates. The data is laid out so nothing overlaps: models along X, point
-    /// clouds floating above them, and a spinning box in front of the camera (without motion a frozen
-    /// frame and a live one look identical). A missing file is reported and skipped — a host never fails
-    /// because of test data — and every loaded file is logged with the same wording as the other host, so
-    /// two runs can be diffed directly. This method and the two helpers below are intentionally identical
-    /// in the Avalonia host, which is what makes that diff meaningful.
+    /// Loads the model named at the top of this file into <paramref name="scene"/>. It stays at the world
+    /// origin: the library's scenes are Z-up and the robot's own base link sits at z=0, so the default
+    /// camera looks straight at it without any placement code. A missing file is reported and skipped —
+    /// a host never fails because of test data — and the logged wording is identical to the Avalonia
+    /// host's, which is what makes the two console logs diffable line by line.
     /// </summary>
-    private static GameObject LoadTestData(SceneGraph scene)
+    private static void LoadRobot(SceneGraph scene)
     {
         Logger.Info($"Test data: {Path.GetFullPath(AssetsRelativePath, AppContext.BaseDirectory)}");
 
-        for (int i = 0; i < ModelRelativePaths.Length; i++)
-        {
-            if (ResolveAssetFile(ModelRelativePaths[i]) is not { } modelPath)
-                continue;
+        if (ResolveAssetFile(ModelRelativePath) is not { } modelPath)
+            return;
 
-            Logger.Info($"Loading model: {modelPath}");
-            RobotModel model = RobotModel.ParseFile(modelPath);
-            // A robot's link transforms are a read-only subtree by design, so the whole robot is placed
-            // through its built-in RootPose interface rather than by writing Transform.Position.
-            model.RootPose = Matrix4x4.CreateTranslation(
-                (i - (ModelRelativePaths.Length - 1) * 0.5f) * ModelSpacing, 0f, 0f);
-            scene.Add(model);
-        }
-
-        for (int i = 0; i < PointCloudRelativePaths.Length; i++)
-        {
-            if (ResolveAssetFile(PointCloudRelativePaths[i]) is not { } cloudPath)
-                continue;
-
-            PointCloud cloud = PointCloud.FromFile(cloudPath);
-            // The point count and the decoded colour of the first point prove that the file *and* its
-            // colour channel were understood — something a screenshot cannot tell a CI script.
-            PointCloud2Data? cloudData = cloud.PointData; // FromFile always attaches data; null is a bug
-            Logger.Info($"Loading point cloud: {cloudPath} ({cloudData?.Count ?? 0} points, " +
-                        $"color: {DescribeColor(cloudData)})");
-            cloud.Transform.Position = new Vector3(
-                (i - (PointCloudRelativePaths.Length - 1) * 0.5f) * CloudSpacing, CloudHeight, 0.6f);
-            scene.Add(cloud);
-        }
-
-        var box = new Box(0.6f, 0.6f, 0.6f, "smoke-box");
-        box.MaterialData!.BaseColor = new Vector4(0.9f, 0.55f, 0.2f, 1f);
-        box.Transform.Position = new Vector3(0f, 0.35f, 1.8f);
-        scene.Add(box);
-        return box;
+        Logger.Info($"Loading model: {modelPath}");
+        scene.Add(RobotModel.ParseFile(modelPath));
     }
 
     /// <summary>
     /// Absolute path of a file below this project's <c>Assets</c> folder, or null when it is absent (the
-    /// caller then skips that entry). Resolved against <see cref="AppContext.BaseDirectory"/> because the
-    /// project file copies <c>Assets</c> next to the executable, so the working directory a user happened
-    /// to start the host from cannot change what is loaded.
+    /// caller then skips it). Resolved against <see cref="AppContext.BaseDirectory"/> because the project
+    /// file copies <c>Assets</c> next to the executable, so the working directory a user happened to start
+    /// the host from cannot change what is loaded.
     /// </summary>
     private static string? ResolveAssetFile(string relativePath)
     {
@@ -304,30 +237,10 @@ public static class Program
         return null;
     }
 
-    /// <summary>
-    /// One-line description of the colours a cloud carries: the first point's rgba, or <c>none</c> when
-    /// the file has no colour channel at all. Reading the colour back is the only way to check that the
-    /// per-point channels were decoded rather than ignored in favour of the material colour.
-    /// </summary>
-    private static string DescribeColor(PointCloud2Data? data)
-    {
-        if (data is not { HasColor: true, Count: > 0 })
-            return "none";
-
-        Vector4 first = data.GetColor(0);
-        return $"first point rgba({first.X:F2}, {first.Y:F2}, {first.Z:F2})";
-    }
-
     private static void OnRender(double deltaTime)
     {
-        // Spin the demo box (degrees → quaternion), proving the per-frame update → render chain runs.
-        if (_spinner is { } box)
-        {
-            _spinDegrees += deltaTime * SpinDegreesPerSecond;
-            box.Transform.Rotation = Quaternion.CreateFromAxisAngle(
-                Vector3.UnitY, (float)(_spinDegrees * Math.PI / 180.0));
-        }
-
+        // Nothing in this host animates: the frame loop exists to prove that update → clear → render
+        // runs every frame and that the GPU stays healthy while the user drives the camera.
         _scene.Update(deltaTime);
         _graphics.Clear(_scene.BackgroundColor);
         _renderer.Render(_scene);

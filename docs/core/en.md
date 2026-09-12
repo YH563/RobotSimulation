@@ -1,6 +1,6 @@
 # RobotSimulation.Core Public API (English)
 
-> Status: reflects the current code. Namespace: `RobotSimulation.Core.*` · Depends on: `AssimpNet`, `Microsoft.Extensions.Logging`.
+> Status: reflects the current code. Namespace: `RobotSimulation.Core.*` · Depends on: `Silk.NET.Assimp`, `Microsoft.Extensions.Logging`.
 > Companion: `../architecture/en.md`, `../robot/en.md`, `../opengl/en.md`.
 
 `Core` is the engine kernel: no graphics, no UI, no robot-domain semantics. It provides the scene object model, pure-CPU render data, render abstraction interfaces, point-cloud & model import, and general utilities. Colors are `Vector4` (RGBA, components `[0,1]`); the world is right-handed **Z-up**, lengths in meters, angles in radians.
@@ -28,12 +28,45 @@ A scene node. It holds only scene data (Transform, CPU model data, CPU material)
 | `Highlighted` | `bool` | Whether highlighted (default false), selection feedback |
 | `HighlightColor` | `Vector4` | Highlight blend color, default orange |
 | `Pickable` | `bool` | Whether it participates in ray picking, default true |
+| `UpdateBehaviors` | `IReadOnlyList<IUpdateBehavior>` | Attached update behaviors (execution order; empty when none) |
+| `UpdateBehaviorCount` | `int` | Number of attached update behaviors (0 = no per-frame work) |
 
 Methods:
 - ctor `GameObject(MeshData? meshData = null, MaterialData? materialData = null, string? name = "")`
 - `void SetSubtreePickable(bool value)` — recursively set `Pickable` on this node and descendants
 - `void LoadModel(string filePath, LoadOptions? options = null)` — load geometry+material from a model file (STL/OBJ/DAE/glTF) into this node (single submesh; for multiple use `AssimpModelLoader.Load`)
-- `virtual void Update(double deltaTime)` — per-frame update hook
+- `void Update(double deltaTime)` — per-frame dispatch: runs the attached behaviors in attach order, skipping disabled ones (called by `SceneGraph.Update`, parent before child)
+- `T AddBehavior<T>(T behavior) where T : IUpdateBehavior` — attach a behavior and return it unchanged (for later removal/pausing)
+- `DelegateUpdateBehavior AddUpdate(Action<GameObject, double> update)` — inject per-frame logic as a lambda (receives `owner, dt`)
+- `DelegateUpdateBehavior AddUpdate(Action<double> update)` — same, for updates that do not need the node
+- `bool RemoveBehavior(IUpdateBehavior behavior)` — detach a behavior; returns whether it was attached
+- `void ClearBehaviors()` — remove every attached update behavior
+
+#### Update behaviors (composition over inheritance)
+
+A node no longer grows by subclassing and overriding `Update`; it **carries** its logic: attach any number of `IUpdateBehavior` instances and `SceneGraph.Update` dispatches them once per frame, in attach order and parent before child. Logic is assembled at runtime, so it can be added/removed, paused, and unit-tested — and it works on `sealed` nodes or nodes produced by file parsing, with no subclass needed. Behaviors run on the update thread and may only mutate CPU data, never GL.
+
+| Type | Location | Notes |
+|---|---|---|
+| `IUpdateBehavior` | `Core.Scene` | The contract: `bool Enabled { get; set; }` + `void Update(GameObject owner, double deltaTime)`; this is what the list holds |
+| `DelegateUpdateBehavior` | `Core.Scene` | Sugar adapting a lambda to `IUpdateBehavior`; created and returned by `AddUpdate` |
+
+```csharp
+var box = new Box(new MeshData(), new MaterialData());
+scene.Add(box);
+
+float spin = 0;
+box.AddUpdate((go, dt) =>                       // logic = one lambda, no subclass
+{
+    spin += (float)(dt * Math.PI);
+    go.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, spin);
+});
+```
+
+- One node can carry several unrelated behaviors (one lambda each); `RemoveBehavior` / `ClearBehaviors` detach them and the same instance can be re-attached later.
+- Pause without detaching: set the `DelegateUpdateBehavior.Enabled` returned by `AddUpdate` to `false`; set it back to `true` to resume.
+- Complex/reusable logic can live in a class implementing `IUpdateBehavior` and be attached with `AddBehavior<T>`; no behavior base class is provided today — add one only when needed.
+- A node with no behaviors costs nothing extra: the list is created lazily and `Update` is a single null check.
 
 ### `Transform`
 Parent/child hierarchy transform, row-major/row-vector. Supports read-only locking: after locking, the `Position` / `Rotation` / `Scale` setters throw `InvalidOperationException`; framework internals use `SetLocalPose` to bypass the guard.
@@ -88,7 +121,7 @@ Methods:
 ### `Light`
 `enum LightType { Directional, Point }`. Members: `Type`, `Color` (`Vector3` intensity), `Direction` / `Position`, `Intensity`, `Range`. Exposes `WorldPosition` / `WorldDirection` (for rendering).
 
-### `GameObject` primitives (`Geometry/`)
+### `GameObject` primitives (`Scene/Primitives/`)
 All `GameObject` subclasses; the ctor generates CPU mesh + material, ready for `scene.Add`:
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)` (axis +Z) / `Capsule(radius, height, name?)` (axis +Z; total height = height + 2×radius)
 - `GroundPlane(size, name?)` / `Arrow(...)` / `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
@@ -131,10 +164,10 @@ Methods: ctor `(PointField[] fields, byte[] data, int pointStep, string? frameId
 Load point clouds from file: static `Load(string path, string? frameId = null)` picks a parser by extension (`.pcd` / `.ply`); `ReadPcd` / `ParsePcd` / `ReadPly` / `ParsePly`. `binary_compressed` is not supported and throws `NotSupportedException`.
 
 ### Model import `Import/`
-- `AssimpModelLoader` (static): `LoadedModel Load(string filePath, LoadOptions? options = null)`. Uses Assimp; pipeline includes triangulation, auto UV/normal/tangent, vertex merge, validation, and cache-friendly ordering.
+- `AssimpModelLoader` (static): `LoadedModel Load(string filePath, LoadOptions? options = null)`. Uses Assimp through the `Silk.NET.Assimp` bindings; pipeline includes triangulation, auto UV/normal/tangent, vertex merge, validation, and cache-friendly ordering.
 - `LoadOptions`: `Default`, `FlipUvV`, `FlipWinding`, `GlobalScale` (unit correction; URDF mesh scale belongs to Transform, not baked here).
 - `LoadedModel`: `FilePath`, `Meshes` (`IReadOnlyList<LoadedMesh>`). `LoadedMesh`: `Name`, `MeshData`, `MaterialData`.
-- `AssimpNative` (static): `bool EnsureRuntime()` — establishes a libdl compatibility link for the Assimp native library on Linux (invoked by the host/tool composition root; the library does not auto-run it).
+- **No native bootstrap**: the Assimp native library ships per-RID inside the `Silk.NET.Assimp` package, so a host has nothing to prepare (the earlier `AssimpNet`-based implementation needed a `libdl.so` compatibility link on Linux; that patch and its dedicated class went away with the migration).
 
 ---
 

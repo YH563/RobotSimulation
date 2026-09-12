@@ -7,7 +7,10 @@ namespace RobotSimulation.Core.Rendering;
 /// </summary>
 public enum TextureColorSpace
 {
+    /// <summary>Gamma-corrected color texture (albedo, UI); the backend uploads it as an sRGB internal format.</summary>
     Srgb,
+
+    /// <summary>Raw numeric texture (normal / metallic / roughness maps); no color correction on upload.</summary>
     Linear,
 }
 
@@ -28,9 +31,13 @@ public sealed record TextureReference(
     bool GenerateMipmaps = true
 ) {
     // Valid only when the reference was populated from a file or from memory.
+    /// <summary>Whether at least one source is set (a file path or in-memory bytes); otherwise the backend rejects it.</summary>
     public bool IsValid => HasFileData || HasMemoryData;
 
+    /// <summary>Whether this reference points at a texture file on disk.</summary>
     public bool HasFileData => !string.IsNullOrEmpty(FilePath);
+
+    /// <summary>Whether this reference carries raw encoded image bytes.</summary>
     public bool HasMemoryData => ImageData is { Length: > 0 };
 
     /// <summary>Creates a texture reference backed by a file path.</summary>

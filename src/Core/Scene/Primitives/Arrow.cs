@@ -15,6 +15,14 @@ public sealed class Arrow : GameObject
     /// <summary>Total arrow length.</summary>
     public float Length { get; }
 
+    /// <summary>Creates an arrow mesh object pointing along local +Z, with the given color.</summary>
+    /// <param name="length">Total length, tail at z=0 to tip at z=<paramref name="length"/>.</param>
+    /// <param name="shaftRadius">Radius of the cylindrical shaft.</param>
+    /// <param name="headRadius">Radius of the cone head (must exceed <paramref name="shaftRadius"/>).</param>
+    /// <param name="headLength">Length of the cone head (must be positive and less than <paramref name="length"/>).</param>
+    /// <param name="color">Base color; null uses the default orange.</param>
+    /// <param name="segments">Circumferential segment count.</param>
+    /// <param name="name">Scene object name (defaults to <c>Arrow</c>).</param>
     public Arrow(
         float length = 1f,
         float shaftRadius = 0.02f,

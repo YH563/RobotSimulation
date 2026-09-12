@@ -17,15 +17,25 @@ public sealed class MeshData
     private readonly List<Vector3> _tangents = new();
     private readonly List<uint> _indices = new();
 
+    /// <summary>Number of vertices (every parallel attribute array below has exactly this length).</summary>
     public int VertexCount => _positions.Count;
 
     /// <summary>Number of triangles (index count / 3).</summary>
     public int TriangleCount => _indices.Count / 3;
 
+    /// <summary>Vertex positions, in local model space.</summary>
     public IReadOnlyList<Vector3> Positions => _positions;
+
+    /// <summary>Vertex normals (unit length; used for lighting).</summary>
     public IReadOnlyList<Vector3> Normals => _normals;
+
+    /// <summary>Texture coordinates, one per vertex.</summary>
     public IReadOnlyList<Vector2> Uvs => _uvs;
+
+    /// <summary>Vertex tangents (used with the normals for normal mapping).</summary>
     public IReadOnlyList<Vector3> Tangents => _tangents;
+
+    /// <summary>Triangle indices, three consecutive entries per triangle.</summary>
     public IReadOnlyList<uint> Indices => _indices;
 
     /// <summary>Adds a vertex and returns its index.</summary>

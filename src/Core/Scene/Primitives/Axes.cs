@@ -37,6 +37,12 @@ public sealed class Axes : GameObject
     /// <summary>Maximum world length of each axis (never larger when the camera is far).</summary>
     public float MaxWorldLength { get; set; } = DefaultMaxLength;
 
+    /// <summary>Creates the three axis arrows as children of this node (+X red, +Y green, +Z blue).</summary>
+    /// <param name="length">Initial arrow length.</param>
+    /// <param name="shaftRadius">Radius of each arrow's shaft.</param>
+    /// <param name="headRadius">Radius of each arrow's cone head.</param>
+    /// <param name="headLength">Length of each arrow's cone head.</param>
+    /// <param name="name">Scene object name (defaults to <c>Axes</c>).</param>
     public Axes(
         float length = 1.2f,
         float shaftRadius = 0.01f,

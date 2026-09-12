@@ -15,14 +15,21 @@
 
 ```csharp
 // URDF text → full robot tree
-public static RobotModel Parse(string urdfXml, string? baseDirectory = null, IAssetResolver? resolver = null);
+public static RobotModel Parse(string urdfXml, string? baseDirectory = null,
+    IAssetResolver? resolver = null, string? assetDirectory = null);
 
 // Read a URDF file → full robot tree (the file directory becomes the base for relative asset paths)
-public static RobotModel ParseFile(string path, IAssetResolver? resolver = null);
+public static RobotModel ParseFile(string path, IAssetResolver? resolver = null,
+    string? assetDirectory = null);
 
 // Extension point: any description source (SDF/custom) → the same robot tree
-public RobotModel(RobotDescription description, IAssetResolver? resolver = null);
+public RobotModel(RobotDescription description, IAssetResolver? resolver = null,
+    string? assetDirectory = null);
 ```
+
+`assetDirectory` is an optional asset root (the equivalent of MuJoCo's `meshdir`): mesh/texture files are looked up there first and fall back to the URDF's own directory. **It is what makes the standard ROS layout loadable** — with the URDF in `pkg/urdf/` and the assets in `pkg/meshes/`, pass `assetDirectory: pkg`; the URDF itself needs no edit. Omitted (the default) = the URDF's own directory only.
+
+> `assetDirectory` and a custom `resolver` are **mutually exclusive**: lookup belongs to the resolver, and passing both could only make one of them silently ignored, so construction throws `ArgumentException`.
 
 Requires `description` to have exactly one root link; multiple roots are not an error ("partial assembly") but building a single `GameObject` needs a single root.
 
@@ -32,7 +39,7 @@ Requires `description` to have exactly one root link; multiple roots are not an 
 |---|---|---|
 | `Description` | `RobotDescription` | The pure-data description this tree was built from (headless / serialization / multi-instance reuse) |
 | `RobotName` | `string` | URDF `<robot name>`; distinct from `GameObject.Name` (root link name) |
-| `AssetResolver` | `IAssetResolver?` | The asset path resolver in use |
+| `AssetResolver` | `IAssetResolver?` | The caller-supplied resolver; `null` means the default `FileSystemAssetResolver` does the lookups (itself bound to the `assetDirectory` the factory received) |
 | `DrivableJoints` | `IReadOnlyList<Joint>` | Drivable joints (Revolute/Continuous/Prismatic, in description order) |
 | `DrivableJointCount` | `int` | Number of drivable joints (array length required by `ApplyJointValues`) |
 | `RootPose` | `Matrix4x4` | Robot overall (root link) pose in its parent frame; written via built-in interfaces |
@@ -96,22 +103,31 @@ Asset-location extension point: resolve a URDF mesh/texture reference string int
 
 ```csharp
 public interface IAssetResolver { string? Resolve(string uri, string? baseDirectory); }
+
+public sealed class FileSystemAssetResolver : IAssetResolver
+{
+    public string? AssetDirectory { get; }                        // extra root (stored absolutized), null when unset
+    public FileSystemAssetResolver(string? assetDirectory = null);
+}
 ```
 
-Default `FileSystemAssetResolver` rules:
-1. Absolute paths resolved as absolute;
-2. Relative paths merged relative to the URDF file directory (`baseDirectory`);
-3. `package://package-name/rest` strips the prefix and looks up "the URDF's sibling directory as package root";
-4. After resolution, existence is still validated; missing throws `FileNotFoundException` (logged via `Logger`), never silently skipped.
+Default `FileSystemAssetResolver` rules (**a fallback chain; first hit wins**):
 
-### `UrdfLocator`
-Locates `.urdf` files (distinct from "URDF internal asset resolution"); the host composition root decides whether to load a robot.
+1. **Absolute path** → used as-is;
+2. **`package://<package-name>/<rest>`** → the package name is **dropped** and `<rest>` continues as a relative path (below). The name is **never** matched against a directory name: it is a ROS package id, and a URDF referencing `package://rus_sim_driver/…` while the files sit in `fairino3_v6/` is normal (a model shipped with this repo does exactly that), so it carries no usable information on disk;
+3. **Relative path** → two roots are tried in order:
+   - `AssetDirectory` (set at construction; the equivalent of MuJoCo's `meshdir`) — **preferred**;
+   - `baseDirectory` (the URDF file's own directory) — **the default**;
+   - Neither available (`Parse` without `baseDirectory` and no `AssetDirectory`) → falls back to the current directory;
+4. **Missing on every root** → throws `FileNotFoundException` whose message **lists every path tried** and points at `AssetDirectory`; never silently skipped.
 
 ```csharp
-public static string? UrdfLocator.Find(string? argument, params string?[]? extraSearchRoots);
-```
+// Default: assets live next to the URDF (this repo's test data — no extra argument needed)
+var robot = RobotModel.ParseFile("Assets/Models/fairino3_v6/fairino3_v6.urdf");
 
-Looks under `AppContext.BaseDirectory`, the current directory, and additional search roots, recursively under each root's `Assets/Models` (the folder each host test copies next to its own executable); if `argument` is an existing file path it is returned directly (absolutized).
+// Standard ROS layout: pkg/{urdf/robot.urdf, meshes/…} — point assetDirectory at the package root
+var robot2 = RobotModel.ParseFile("pkg/urdf/robot.urdf", assetDirectory: "pkg");
+```
 
 ---
 
@@ -159,6 +175,6 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 6. Visibility
 
-- **public (user-facing)**: `RobotModel`, `IAssetResolver`, `FileSystemAssetResolver`, `UrdfLocator`, `UrdfParseException`, all `Description` data models, `RobotState`.
+- **public (user-facing)**: `RobotModel`, `IAssetResolver`, `FileSystemAssetResolver` (including the `AssetDirectory` property and constructor argument — the asset-root entry point), `UrdfParseException`, all `Description` data models, `RobotState`.
 - **internal (implementation detail)**: `UrdfParser` — users enter only via `RobotModel.Parse/ParseFile`.
 - The Robot layer exposes no render/GL resources; `RobotModel` construction yields only CPU data (`MeshData`/`MaterialData`); GPU instantiation is done uniformly by the render backend on the render thread.

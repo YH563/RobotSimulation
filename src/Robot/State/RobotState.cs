@@ -40,6 +40,12 @@ public sealed class RobotState
     private Matrix4x4 _rootPose = Matrix4x4.Identity;
     private bool _dirty = true;
 
+    /// <summary>
+    /// Builds the state for a robot description: collects its drivable joints, links each link to its
+    /// parent joint and computes a parents-before-children topological order.
+    /// </summary>
+    /// <param name="description">The parsed robot description to drive.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="description"/> is null.</exception>
     public RobotState(RobotDescription description)
     {
         _description = description ?? throw new ArgumentNullException(nameof(description));

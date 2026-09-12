@@ -10,14 +10,15 @@
 
 | 程序集 / Assembly | 职责 / Responsibility | 依赖 / Depends on |
 |---|---|---|
-| **`RobotSimulation.Core`** | 引擎内核：场景对象模型（`Scene`）、纯 CPU 几何数据与模型导入（`Geometry`）、渲染抽象接口与材质/纹理描述（`Rendering`）、点云（`PointCloud2Data`）、工具（`Utils`）。零图形、零 UI 依赖。 | `AssimpNet`、`Microsoft.Extensions.Logging` |
+| **`RobotSimulation.Core`** | 引擎内核：场景对象模型（`Scene`）、纯 CPU 几何数据与模型导入（`Geometry`）、渲染抽象接口与材质/纹理描述（`Rendering`）、点云（`PointCloud2Data`）、工具（`Utils`）。零图形、零 UI 依赖。 | `Silk.NET.Assimp`、`Microsoft.Extensions.Logging` |
 | **`RobotSimulation.Robot`** | 机器人领域模型：URDF / 描述（`Description`、`Urdf`）、headless 正向运动学（`State`）、机器人 `GameObject` 树构建（`RobotModel`）。 | `Core` |
 | **`RobotSimulation.OpenGL`** | 唯一渲染后端：Silk.NET OpenGL + StbImageSharp 的网格 / 材质 / 纹理 / **着色器**与渲染器（`Device`、`Rendering`、`Resources`）。 | `Core` |
 | *(test) `BareWindowTest`* | 裸窗口宿主测试：极简 Silk.NET 窗口，**不含任何 UI 框架**；同时充当自动化冒烟测试（`--smoke [frames]` → 退出码 0/1）。**不发布**。 | `Core`, `Robot`, `OpenGL` |
 | *(test) `AvaloniaTest`* | Avalonia 宿主测试：把本库嵌入 `RobotViewportControl`（派生自 `Avalonia.OpenGL.Controls.OpenGlControlBase`），并把 GPU / 帧率 / 冒烟信息按**与裸窗口宿主完全相同的措辞**打印到控制台。**不发布**。 | `Core`, `Robot`, `OpenGL`, `Avalonia` |
-| *(data) `BareWindowTest/Assets`、`AvaloniaTest/Assets`* | 各宿主测试自己的测试数据：每个工程一个 `Assets/` 目录——`Models/`（URDF + mesh，如 `fairino3_v6`）与 `PointClouds/`（.pcd / .ply），由该工程的 `.csproj` 拷到自己的可执行文件旁。宿主读取的是 `Assets/` 下的固定相对路径，因此一次运行完全由代码描述：无路径参数、无共享目录、无路径表。 | — |
+| *(test) `RobotSimulation.Tests`* | xunit 单元级检查（面向已发布面）：`FileSystemAssetResolver` 的路径解析（根顺序、`package://` 处理、未命中时硬失败）与端到端 URDF → `RobotModel` 加载，含只有 `assetDirectory` 才能加载的标准 ROS 布局。**不发布**。 | `Core`, `Robot` |
+| *(data) `BareWindowTest/Assets`、`AvaloniaTest/Assets`* | 各宿主测试自己的测试数据：每个工程一个 `Assets/` 目录，由该工程的 `.csproj` 拷到自己的可执行文件旁。宿主只加载**写在自己源码里的那一个 URDF**（`Models/fairino3_v6/`）；目录里另备了可直接换用的样例（`Models/primitives.urdf`、`Models/urdf_tutorial/`、`Models/formats/`、`PointClouds/`）。无路径参数、无共享目录、无路径表。`RobotSimulation.Tests` 就地从这两棵树读取，并自带一份 ROS 工作区样例。 | — |
 
-> 打包元数据（`PackageId` / `Version` / `readme` 等）在正式发布前补全；当前 `src/{Core,Robot,OpenGL}` 的划分已等同于未来三个 NuGet 包。
+> 打包：三个库分别打包为 `RobotSimulation.Core` / `.Robot` / `.OpenGL`。`PackageId`、`Version`、`Authors`、`RepositoryUrl`、`PackageReadmeFile` 与符号包均已配置（`Directory.Build.props` + 各 `.csproj`），且每个包都带上生成的 XML 文档文件供 IntelliSense 使用——`dotnet pack RobotSimulation.sln` 产出三个 `.nupkg` + `.snupkg`。**许可**也已确定：MIT——在 `Directory.Build.props` 中以 SPDX 表达式 `MIT` 声明，仓库根另有配套的 `LICENSE`，且每个包都会随包携带一份，因此 `dotnet pack` 的产物自带许可声明。
 
 ## 2. 核心特性 / Feature Highlights
 
@@ -30,7 +31,7 @@
 - **机器人**: `RobotModel`（URDF → 机器人 GameObject 树、is a `GameObject`）、`RobotState`（headless FK）、纯数据描述、可扩展的 `IAssetResolver`。
 - **自定义着色器**: OpenGL 后端内置完整 GLSL 管线（Model / Line / Point / Skybox / Axes）作为嵌入资源，架构上刻意让「着色器」成为可做到游戏引擎式的一等扩展点（详见 `docs/opengl/zh-CN.md`；单节点自定义着色器注入为下一步规划）。
 - **拾取**: `Camera.ScreenToWorldRay` → `SceneGraph.Pick` / `PickAndHighlight`（含高亮反馈）。
-- **跨 UI 嵌入**: public 签名永不出现 `Silk.NET.*` / OpenGL / 窗口类型；后端与宿主可整体替换。
+- **跨 UI 嵌入**: `Core` / `Robot` 完全不接触图形与窗口 API；`OpenGL` 只在"宿主自己的 GL 句柄必须穿过边界"处出现 Silk.NET（`GraphicsFactory.Create` / `CreateContext` 及经由它上传的资源类型）——后端与宿主可整体替换。
 
 ## 3. 安装 / Install
 
@@ -66,6 +67,7 @@ Matrix4x4 eePose = state.GetLinkGlobalPose("tool0");
 ### 4.2 可视化：搭建场景 + 加入机器人（渲染由后端处理）
 
 ```csharp
+using System.Numerics;
 using RobotSimulation.Core.Scene;
 using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
@@ -81,7 +83,14 @@ var robot = RobotModel.ParseFile("arm.urdf");
 scene.Add(robot);
 robot.SetJointValue("shoulder", 0.8f);
 
-// 每次更新：驱动关节、更新场景（后台线程），随后由 Renderer 在渲染线程绘制
+// 每帧逻辑是「注入」的，而非继承子类（可选）：任意节点都能挂行为
+var marker = new Box(0.2f, 0.2f, 0.2f, name: "marker");
+scene.Add(marker);
+float spin = 0;
+marker.AddUpdate((go, dt) =>
+    go.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, spin += (float)dt));
+
+// 每次更新：驱动关节、跑行为/更新场景（后台线程），随后由 Renderer 在渲染线程绘制
 scene.Update(deltaTime);
 ```
 
@@ -126,7 +135,7 @@ public class RobotViewportControl : OpenGlControlBase          // Avalonia 按�
 }
 ```
 
-仓库内提供两个可直接运行的宿主测试，二者**不接受任何数据参数**：各自加载写在自己源码里的那份测试数据——`Assets/Models/**` 与 `Assets/PointClouds/**`，由工程文件拷到可执行文件旁——并把相同的 GPU / FPS / 冒烟信息打印到控制台，因此两次运行可以逐行对比：
+仓库内提供两个可直接运行的宿主测试，二者**不接受任何数据参数**：各自加载**写在自己源码里的那一个 URDF**——`Assets/Models/fairino3_v6/fairino3_v6.urdf`，由工程文件拷到可执行文件旁——并把相同的 GPU / FPS / 冒烟信息打印到控制台，因此两次运行可以逐行对比：
 
 ```bash
 # 任一宿主：渲染 120 帧、打印 GPU + FPS、退出码 0，可直接作为 CI 冒烟测试
@@ -137,11 +146,11 @@ dotnet run --project src/AvaloniaTest  -- --smoke 120
 dotnet run --project src/AvaloniaTest
 ```
 
-一次运行只装载**一个场景**，但覆盖完整数据集：URDF 内置几何（`primitives.urdf`）、社区 `urdf_tutorial` 包里的两个机器人、带 STL mesh 的 `fairino3_v6` 机械臂、`formats.urdf` 里的全部五种 mesh 格式，以及两个 RGB 点云（PLY 的 `red`/`green`/`blue` 与 PCD 的打包 `rgb`）。数据来源、如何新增或下载更多数据见 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。
+一次运行只装载**一个 URDF**（`fairino3_v6`）；地面网格、灯光、世界坐标轴与相机位姿全部来自库默认的 `SceneGraph`，窗口里再提供轨道相机（拖拽）、缩放（滚轮 / 右键拖拽）与点击选中高亮。仓库的 `Assets/` 里另备了一批可直接换用的样例——URDF 内置几何、社区 `urdf_tutorial` 包、全部五种 mesh 格式、两个 RGB 点云——以及生成它们的脚本；换用只需改一个常量。数据来源、如何新增或下载更多数据见 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。
 
 ## 5. 分模块文档 / Documentation
 
-全部按模块拆分为中文 / 英文两版——见 [`docs/README.md`](docs/README.md)。
+全部拆分为中文 / 英文两版，模块如此，本索引亦然——[`docs/README.zh-CN.md`](docs/README.zh-CN.md)（中文）/ [`docs/README.md`](docs/README.md)（English）。
 
 | 文档 / Doc | 内容 / Contents |
 |---|---|
@@ -161,14 +170,18 @@ dotnet run --project src/AvaloniaTest
 
 ## 7. 路线图 / Roadmap
 
-- [ ] 发布打包（`PackageId` / 版本 / NuGet 元数据）。
+- [x] 打包元数据（`PackageId` / 版本 / NuGet 元数据 / README / 许可）：由 `Directory.Build.props` 加各 `.csproj` 承担，已用 `dotnet pack` 验证——产出 3 个 `.nupkg` + 3 个 `.snupkg`，每个包都带 XML 文档、README 与一份 `LICENSE`。推送至源仍是单独的手动步骤。
 - [ ] `Visualization` 显示层（rviz-like Display）与外部写入协议（Sink）。
 - [ ] 三个宿主示例 / 测试项目：裸窗口、WPF、Avalonia——各一个 `RobotViewport` 式控件，既证明本库**可独立渲染显示**，也作为收编相关测试的载体。**已完成**：裸窗口（`src/BareWindowTest`）✔、Avalonia（`src/AvaloniaTest`）✔；WPF 待做。
-- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。
+- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。**进行中**：`src/RobotSimulation.Tests`（xunit，14 项检查）已覆盖 URDF 解析与 `IAssetResolver` 路径解析的端到端行为，含只有 `assetDirectory` 才能加载的标准 ROS 布局 ✔；几何图元、射线拾取与 `RobotState` FK 待做。
 - [ ]（可选）额外的非 Silk 渲染后端。
 
 ---
 
 ## 8. 许可 / License
 
-(TODO) 发布前在此补充许可证；默认拟以宽松许可（如 MIT）发布。
+MIT——见 [`LICENSE`](LICENSE)。三个库包在 `Directory.Build.props` 中以 SPDX 表达式 `MIT` 声明，因此
+`dotnet pack` 的产物自带许可声明、无需包内许可文件；不过每个包仍会随 README 一起打进一份 `LICENSE`。
+
+本许可只覆盖本仓库自有源码。随仓库携带的测试数据保留各自条款——`Assets/Models/` 下的 `urdf_tutorial`
+样例为 BSD-3-Clause，详见各目录内的 README 与 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。

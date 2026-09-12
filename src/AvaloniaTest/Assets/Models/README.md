@@ -1,9 +1,10 @@
 # Test models (`Assets/Models`)
 
-The URDF models that **every** run of this host test loads. The authoritative list is the table at the
-top of `src/BareWindowTest/Program.cs` and the identical one in `Controls/RobotViewportControl.cs` of the
-Avalonia host. The project file copies this folder next to the executable, so those paths resolve from
-the executable directory — whatever working directory the host was started from.
+The URDF models available to this host test. The host loads **one** of them: the name in
+`ModelRelativePath` in `Controls/RobotViewportControl.cs`, and in `src/BareWindowTest/Program.cs` of the
+bare-window host. The rest are ready-to-use samples — change that one constant to switch, and see
+`docs/testing` for the layouts and provenance. The project file copies this folder next to the executable,
+so those paths resolve from the executable directory — whatever working directory the host was started from.
 
 | Path | Origin | What it covers |
 | --- | --- | --- |
@@ -22,8 +23,8 @@ meshes/l_finger.dae` would then no longer resolve, and the meshes would silently
 ## Adding data
 
 1. Drop the package under this folder (keep the layout above).
-2. Add the `.urdf` path, relative to `Assets/`, to `ModelRelativePaths` in **both** hosts so they keep
-   loading the same set in the same order.
+2. Point `ModelRelativePath` (the single constant) at the `.urdf` path, relative to `Assets/`, in **both**
+   hosts so they keep loading the same file.
 3. Run a host: a missing file is logged and skipped instead of failing the run, so a half-added model is
    easy to spot in the output.
 

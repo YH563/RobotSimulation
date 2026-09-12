@@ -8,7 +8,7 @@ namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
 /// Standard shader catalog: the GLSL source files live in this assembly's <c>Shaders/</c> directory
-/// (Model/Line/Point/Skybox each with a .vert/.frag), distributed as embedded resources with
+/// (Model/Line/Point/Skybox/Axes each with a .vert/.frag), distributed as embedded resources with
 /// RobotSimulation.OpenGL. The Core side only agrees on the <see cref="RenderPassKind"/> passes; the
 /// host needs no shader file paths. Edit GLSL directly under <c>Shaders/*.vert|frag</c>.
 /// </summary>

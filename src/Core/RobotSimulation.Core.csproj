@@ -4,12 +4,33 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <!-- Silk.NET.Assimp hands back unmanaged scene structs; AssimpModelLoader copies the data out of
+             them with pointer access. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Public API documentation: emit the XML doc file next to the assembly. The compiler then
+             reports CS1591 for every public member that has no XML comment, and a future NuGet package
+             carries the IntelliSense text. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
+             the repo-root Directory.Build.props. -->
+        <PackageId>RobotSimulation.Core</PackageId>
+        <Description>Engine kernel for RobotSimulation: scene object model (GameObject / Transform / SceneGraph / Camera / Light), pure-CPU geometry and model import (MeshData, AssimpModelLoader), render abstraction with material and texture description, point clouds (PCD / PLY) and utilities. Zero graphics API, zero UI framework.</Description>
+        <PackageTags>robot;3d;scene-graph;geometry;mesh;assimp;point-cloud;visualization</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="AssimpNet" Version="4.1.0" />
+      <!-- Assimp through the Silk.NET bindings (same 2.23.0 family as the OpenGL backend). The native
+           library ships per-RID inside this package, so no runtime bootstrap is needed — unlike the
+           previous AssimpNet 4.1, which required a libdl.so compatibility link on Linux. -->
+      <PackageReference Include="Silk.NET.Assimp" Version="2.23.0" />
       <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
       <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    </ItemGroup>
+
+    <!-- The package README and license: one file each for the whole family, taken from the repo root. -->
+    <ItemGroup>
+      <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+      <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
     </ItemGroup>
 
 </Project>

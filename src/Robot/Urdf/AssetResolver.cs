@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using RobotSimulation.Core.Utils;
 
@@ -22,74 +23,133 @@ public interface IAssetResolver
 }
 
 /// <summary>
-/// Default filesystem implementation (simple rules, direct errors to help the user check their URDF):
+/// Default filesystem implementation: turns a URDF reference into an existing absolute path by trying a
+/// short, ordered list of roots and returning the first hit — never guessing a file, never skipping one.
 /// <list type="bullet">
-///   <item>Absolute path: located as an absolute path.</item>
-///   <item>Relative path: combined relative to the URDF file's directory (baseDirectory).</item>
-///   <item><c>package://package-name/relative-path</c>: strips the package prefix and looks for the
-///   remaining relative path next to the URDF file (treating "next to the URDF" as the package root).</item>
+///   <item>Absolute path: used as-is.</item>
+///   <item>Relative path: searched under <see cref="AssetDirectory"/> first (when one is set), then under
+///   <c>baseDirectory</c> — the URDF file's own directory. This is MuJoCo's <c>meshdir</c> idea: an
+///   explicitly configured root wins, the URDF's own folder stays the default.</item>
+///   <item><c>package://package-name/rest</c>: the package name is dropped and <c>rest</c> is then searched
+///   like a relative path. The name is deliberately never matched against a directory name — it is a ROS
+///   package id, and URDFs routinely reference <c>package://rus_sim_driver/…</c> from a folder called
+///   <c>fairino3_v6</c>, so it carries no usable information on disk.</item>
 /// </list>
-/// After resolving, it still checks existence: if the file is missing it throws
-/// <see cref="FileNotFoundException"/> directly so the user fixes the URDF filename or asset layout — no
-/// silent skipping.
+/// A miss on every root is a hard error (<see cref="FileNotFoundException"/>) that lists every path tried,
+/// so a broken reference is fixed in the URDF or by pointing <see cref="AssetDirectory"/> at the right
+/// folder — it is never silently skipped.
 /// </summary>
 public sealed class FileSystemAssetResolver : IAssetResolver
 {
+    private const string PackagePrefix = "package://";
+
+    /// <summary>
+    /// Extra root searched before the URDF file's own directory (the equivalent of MuJoCo's <c>meshdir</c>),
+    /// or null when no extra root is configured. Always absolute.
+    /// </summary>
+    public string? AssetDirectory { get; }
+
+    /// <summary>
+    /// Creates the resolver.
+    /// </summary>
+    /// <param name="assetDirectory">
+    /// Extra directory to look for mesh/texture files in, tried before the URDF file's directory. A relative
+    /// value is absolutized here against the current directory, so the search does not move if the process
+    /// later changes its working directory. Null/blank = no extra root (the URDF directory is used alone).
+    /// </param>
+    public FileSystemAssetResolver(string? assetDirectory = null)
+    {
+        AssetDirectory = string.IsNullOrWhiteSpace(assetDirectory)
+            ? null
+            : Path.GetFullPath(assetDirectory);
+    }
+
+    /// <summary>
+    /// Resolves an asset reference to an absolute path on disk, or null when nothing matches.
+    /// A <c>package://</c> prefix is dropped (the package name is never matched against a directory);
+    /// an absolute path is used as-is, and a relative one is tried against the fallback chain described
+    /// on this class. Every path that was tried is listed in the exception when nothing matches.
+    /// </summary>
+    /// <param name="uri">The reference as written in the URDF (e.g. <c>package://pkg/meshes/a.stl</c>).</param>
+    /// <param name="baseDirectory">Directory of the referencing file (the URDF), used as the first fallback root.</param>
+    /// <exception cref="ArgumentException"><paramref name="uri"/> is null or blank.</exception>
+    /// <exception cref="FileNotFoundException">No candidate path exists.</exception>
     public string? Resolve(string uri, string? baseDirectory)
     {
         if (string.IsNullOrWhiteSpace(uri))
             throw new ArgumentException("Asset reference string cannot be empty.", nameof(uri));
 
-        string candidate;
-        if (uri.StartsWith("package://", StringComparison.OrdinalIgnoreCase))
-        {
-            candidate = ResolvePackageUri(uri, baseDirectory);
-        }
-        else if (Path.IsPathRooted(uri))
-        {
-            candidate = Path.GetFullPath(uri);
-        }
-        else
-        {
-            candidate = CombineRelative(baseDirectory, uri);
-        }
+        string reference = uri.StartsWith(PackagePrefix, StringComparison.OrdinalIgnoreCase)
+            ? StripPackagePrefix(uri)
+            : uri;
 
-        if (File.Exists(candidate))
+        IReadOnlyList<string> candidates = Path.IsPathRooted(reference)
+            ? new[] { Path.GetFullPath(reference) }
+            : BuildCandidates(reference, baseDirectory);
+
+        foreach (string candidate in candidates)
         {
+            if (!File.Exists(candidate))
+                continue;
+
             Logger.Debug($"[AssetResolver] '{uri}' → {candidate}");
             return candidate;
         }
 
-        string hint = Path.GetDirectoryName(candidate) is { } dir && !string.IsNullOrEmpty(dir)
-            ? $" (expected directory: {dir})"
-            : string.Empty;
-        Logger.Error(
-            $"URDF asset not found: {candidate} (original reference: {uri}){hint}. " +
-            "Check the mesh/texture filename in the URDF, or move the asset to the corresponding directory and retry.");
-        throw new FileNotFoundException(
-            $"URDF asset not found: {candidate} (original reference: {uri}). " +
-            "Check the mesh/texture filename in the URDF or the asset layout.", candidate);
+        string tried = string.Join(" | ", candidates);
+        string message =
+            $"URDF asset not found: '{uri}'. Tried: {tried}. " +
+            "Check the mesh/texture filename in the URDF, or point AssetDirectory at the folder that contains it and retry.";
+        Logger.Error(message);
+        throw new FileNotFoundException(message, candidates[0]);
     }
 
-    /// <summary>package://package-name/rest → rest next to the URDF (using "next to the URDF file" as the package root).</summary>
-    private static string ResolvePackageUri(string uri, string? baseDirectory)
+    /// <summary><c>package://package-name/rest</c> → <c>rest</c>; the package name is deliberately discarded.</summary>
+    private static string StripPackagePrefix(string uri)
     {
-        const string prefix = "package://";
-        int restStart = uri.IndexOf('/', prefix.Length);
-        if (restStart < 0)
+        int restStart = uri.IndexOf('/', PackagePrefix.Length);
+        if (restStart < 0 || restStart == uri.Length - 1)
             throw new FileNotFoundException(
-                $"package:// reference lacks a path: {uri}. The URDF mesh filename should be of the form package://package-name/relative/path.", uri);
+                $"package:// reference has no usable path: {uri}. " +
+                "The URDF mesh filename should be of the form package://package-name/relative/path.",
+                uri);
 
-        string relative = uri[(restStart + 1)..];
-        if (string.IsNullOrEmpty(baseDirectory))
-            throw new FileNotFoundException(
-                $"package:// reference ({uri}) cannot be resolved: the URDF file directory (baseDirectory) is missing.", uri);
-
-        return Path.Combine(baseDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+        return uri[(restStart + 1)..];
     }
 
-    private static string CombineRelative(string? baseDirectory, string relative)
-        => string.IsNullOrEmpty(baseDirectory)
-            ? Path.GetFullPath(relative)
-            : Path.GetFullPath(Path.Combine(baseDirectory, relative));
+    /// <summary>
+    /// Ordered, de-duplicated candidates for a relative reference: the configured extra root first, then the
+    /// URDF file's directory. With no root at all (no base directory and no <see cref="AssetDirectory"/>) the
+    /// reference falls back to the current directory, which is what a bare relative path always meant.
+    /// </summary>
+    private IReadOnlyList<string> BuildCandidates(string reference, string? baseDirectory)
+    {
+        var roots = new List<string>(2);
+        AddRoot(roots, AssetDirectory);
+        AddRoot(roots, baseDirectory);
+
+        if (roots.Count == 0)
+            return new[] { Path.GetFullPath(reference) };
+
+        var candidates = new List<string>(roots.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string root in roots)
+        {
+            string candidate = Path.GetFullPath(Path.Combine(root, reference));
+            if (seen.Add(candidate))
+                candidates.Add(candidate); // Identical roots (e.g. assetDirectory == baseDirectory) collapse to one candidate.
+        }
+
+        return candidates;
+    }
+
+    private static void AddRoot(List<string> roots, string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+            return;
+
+        string full = Path.GetFullPath(root);
+        if (!roots.Contains(full, StringComparer.Ordinal))
+            roots.Add(full);
+    }
 }

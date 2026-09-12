@@ -6,6 +6,8 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Host application, not a library: never produce a NuGet package for it. -->
+        <IsPackable>false</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
@@ -23,10 +25,10 @@
         <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
     </ItemGroup>
 
-    <!-- Test data lives in this project's own Assets folder (URDF models, their meshes, point clouds)
-         and is copied next to the executable, so the relative paths written into the scene builder
-         (RobotViewportControl) resolve regardless of the working directory the host was started from.
-         To change what a run loads, drop a file under Assets and add its name in there. -->
+    <!-- Test data lives in this project's own Assets folder and is copied next to the executable, so the
+         path written into the scene builder (RobotViewportControl) resolves regardless of the working
+         directory the host was started from. To change what a run loads, drop the file under Assets and
+         point ModelRelativePath at it. -->
     <ItemGroup>
         <None Remove="Assets\**\*" />
         <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />

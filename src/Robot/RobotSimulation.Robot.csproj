@@ -4,10 +4,25 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <!-- Public API documentation: emit the XML doc file next to the assembly. The compiler then
+             reports CS1591 for every public member that has no XML comment, and a future NuGet package
+             carries the IntelliSense text. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
+             the repo-root Directory.Build.props. -->
+        <PackageId>RobotSimulation.Robot</PackageId>
+        <Description>Robot domain model for RobotSimulation: URDF parsing and pure-data description (RobotDescription / Link / Visual / Geometry / Joint), headless forward kinematics (RobotState), and the robot GameObject tree (RobotModel) with an extensible IAssetResolver for mesh and texture references.</Description>
+        <PackageTags>robot;urdf;forward-kinematics;kinematics;rviz;visualization;ros</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Core\RobotSimulation.Core.csproj" />
+    </ItemGroup>
+
+    <!-- The package README and license: one file each for the whole family, taken from the repo root. -->
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+        <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
     </ItemGroup>
 
 </Project>

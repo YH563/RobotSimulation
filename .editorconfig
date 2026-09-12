@@ -1,0 +1,7 @@
+# 命名空间是「对外 API 契约」，文件夹只是仓库内部的组织方式。
+# 两者刻意解耦：允许把文件放进比命名空间更细的文件夹（见 docs/architecture/zh-CN.md 第 3 节 / ADR-020）。
+# 显式关闭 IDE0130「命名空间应与文件夹结构匹配」，避免编辑器/分析器怂恿把文件夹同步成命名空间。
+root = true
+
+[*.cs]
+dotnet_style_namespace_match_folder = false

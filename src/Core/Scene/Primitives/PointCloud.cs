@@ -17,6 +17,11 @@ namespace RobotSimulation.Core.Scene;
 /// </summary>
 public sealed class PointCloud : GameObject
 {
+    /// <summary>Creates an empty point cloud; fill it via <see cref="SetPoints"/>, <see cref="SetData"/> or <see cref="FromFile"/>.</summary>
+    /// <param name="pointSize">Point sprite size in pixels.</param>
+    /// <param name="color">Point color used when the data carries no per-point colors; null uses the default orange.</param>
+    /// <param name="name">Scene object name (defaults to <c>PointCloud</c>).</param>
+    /// <param name="data">Optional backing data; null starts from an empty cloud.</param>
     public PointCloud(float pointSize = 3f, Vector4? color = null, string? name = null,
         PointCloud2Data? data = null)
         : base(null, null, name ?? nameof(PointCloud))

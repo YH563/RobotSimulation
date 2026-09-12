@@ -18,6 +18,11 @@ public class Texture2D : IDisposable
     private readonly uint _handle;
     private bool _disposed;
 
+    /// <summary>Decodes and uploads the texture described by <paramref name="textureRef"/>.</summary>
+    /// <param name="gl">The GL facade to create the texture on.</param>
+    /// <param name="textureRef">CPU-side reference (file path or raw bytes) plus color-space/mipmap settings.</param>
+    /// <exception cref="ArgumentException"><paramref name="textureRef"/> is invalid (neither a path nor data).</exception>
+    /// <exception cref="System.IO.FileNotFoundException">The referenced file does not exist.</exception>
     public Texture2D(GL gl, TextureReference textureRef)
     {
         _gl = gl;
@@ -81,17 +86,25 @@ public class Texture2D : IDisposable
         _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
+    /// <summary>Convenience overload that uploads a texture straight from a file path.</summary>
+    /// <param name="gl">The GL facade to create the texture on.</param>
+    /// <param name="filePath">Image file to decode.</param>
+    /// <param name="generateMipmaps">Whether to build a mipmap chain.</param>
+    /// <param name="colorSpace">Srgb for color textures, Linear for numeric maps.</param>
     public Texture2D(GL gl, string filePath, bool generateMipmaps = true, TextureColorSpace colorSpace = TextureColorSpace.Srgb)
         : this(gl, TextureReference.FromFile(filePath, colorSpace, generateMipmaps))
     {
     }
 
+    /// <summary>Makes this texture current on the given texture unit (sampler value), ready to be sampled.</summary>
+    /// <param name="unit">Target texture unit (default <c>Texture0</c>).</param>
     public void Bind(TextureUnit unit = TextureUnit.Texture0)
     {
         _gl.ActiveTexture(unit);
         _gl.BindTexture(TextureTarget.Texture2D, _handle);
     }
 
+    /// <summary>Deletes the GL texture; safe to call more than once.</summary>
     public void Dispose()
     {
         if (!_disposed && _handle != 0)

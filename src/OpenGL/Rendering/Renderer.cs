@@ -349,6 +349,10 @@ public sealed class Renderer : IRenderer
         return value;
     }
 
+    /// <summary>
+    /// Releases every cached GPU resource (meshes, lines, points, materials) and every pass shader.
+    /// Must run while the GL context is still current; safe to call more than once.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

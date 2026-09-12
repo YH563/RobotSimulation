@@ -37,6 +37,8 @@ public class Light : GameObject
     /// <summary>Point light world position (i.e. Transform position).</summary>
     public Vector3 Position => Transform.Position;
 
+    /// <summary>Creates a light with the default appearance (white, intensity 1, point type).</summary>
+    /// <param name="name">Scene object name (defaults to <c>Light</c>).</param>
     public Light(string? name = "Light") : base(null, null, name)
     {
     }

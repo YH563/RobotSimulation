@@ -19,6 +19,11 @@ public sealed class LoadedMesh
     /// <summary>Material used by this submesh (from the file, or a default appearance).</summary>
     public MaterialData MaterialData { get; }
 
+    /// <summary>Creates one drawable batch from a geometry/material pair.</summary>
+    /// <param name="name">Submesh name from the source file; null or blank is normalized to null.</param>
+    /// <param name="meshData">Geometry (required).</param>
+    /// <param name="materialData">Material (required).</param>
+    /// <exception cref="ArgumentNullException"><paramref name="meshData"/> or <paramref name="materialData"/> is null.</exception>
     public LoadedMesh(string? name, MeshData meshData, MaterialData materialData)
     {
         MeshData = meshData ?? throw new ArgumentNullException(nameof(meshData));
@@ -39,6 +44,10 @@ public sealed class LoadedModel
     /// <summary>All drawable submeshes (an empty model fails at import, so this is never empty).</summary>
     public IReadOnlyList<LoadedMesh> Meshes { get; }
 
+    /// <summary>Creates an import result from its file path and flattened submesh list.</summary>
+    /// <param name="filePath">Absolute path of the parsed file.</param>
+    /// <param name="meshes">All drawable submeshes.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="filePath"/> or <paramref name="meshes"/> is null.</exception>
     public LoadedModel(string filePath, IReadOnlyList<LoadedMesh> meshes)
     {
         FilePath = filePath ?? throw new ArgumentNullException(nameof(filePath));

@@ -3,36 +3,60 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Numerics;
-using Assimp;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Utils;
+using Silk.NET.Assimp;
 // This file's namespace parent is RobotSimulation.Core, so a bare "Scene" would resolve to the
-// RobotSimulation.Core.Scene namespace (not the type). Use an alias for Assimp.Scene.
-using AScene = Assimp.Scene;
+// RobotSimulation.Core.Scene namespace (not the type). Use an alias for Assimp's scene struct.
+using AScene = Silk.NET.Assimp.Scene;
+// The bindings also declare a "File" (assimp's aiFile), which would otherwise shadow System.IO.File here.
+using File = System.IO.File;
 
 namespace RobotSimulation.Core.Geometry.Import;
 
 /// <summary>
-/// 3D model file importer: uses Assimp to parse STL / OBJ / DAE / glTF files into pure CPU data
-/// <see cref="LoadedModel"/> (each submesh = <see cref="MeshData"/> + <see cref="MaterialData"/>).
-/// No GL/UI dependency; callable from any thread. Textures only record file/memory references;
-/// GPU upload is the rendering backend's responsibility.
+/// 3D model file importer: uses Assimp (through the Silk.NET bindings) to parse STL / OBJ / DAE / glTF / PLY
+/// files into pure CPU data <see cref="LoadedModel"/> (each submesh = <see cref="MeshData"/> +
+/// <see cref="MaterialData"/>). No GL/UI dependency; callable from any thread. Textures only record
+/// file/memory references; GPU upload is the rendering backend's responsibility.
 /// </summary>
-public static class AssimpModelLoader
+/// <remarks>
+/// This is the one type in the library that reads native memory: Assimp returns a tree of unmanaged structs
+/// and everything here is copied out of it (into <see cref="MeshData"/> / <see cref="MaterialData"/>) before
+/// the scene is released. The native library arrives with the <c>Silk.NET.Assimp</c> package as per-RID
+/// runtime assets, so there is no bootstrap step to perform — unlike the earlier <c>AssimpNet</c>-based
+/// implementation, which needed a <c>libdl.so</c> compatibility link on Linux.
+/// </remarks>
+public static unsafe class AssimpModelLoader
 {
     // Pipeline: triangulate + auto UV/normal/tangent space (when missing) + vertex merging + validation
     // + cache-friendly ordering. No FlipUVs/FlipWinding — those are controlled explicitly by LoadOptions.
-    private const PostProcessSteps ImportSteps =
-        PostProcessSteps.Triangulate |
-        PostProcessSteps.GenerateUVCoords |
-        PostProcessSteps.GenerateSmoothNormals |
-        PostProcessSteps.CalculateTangentSpace |
-        PostProcessSteps.JoinIdenticalVertices |
-        PostProcessSteps.ValidateDataStructure |
-        PostProcessSteps.ImproveCacheLocality;
+    private const uint ImportSteps =
+        (uint)(PostProcessSteps.Triangulate |
+               PostProcessSteps.GenerateUVCoords |
+               PostProcessSteps.GenerateSmoothNormals |
+               PostProcessSteps.CalculateTangentSpace |
+               PostProcessSteps.JoinIdenticalVertices |
+               PostProcessSteps.ValidateDataStructure |
+               PostProcessSteps.ImproveCacheLocality);
+
+    // Material property keys — the string form of assimp's AI_MATKEY_* macros (key, type 0, index 0).
+    private const string MaterialKeyName = "?mat.name";
+    private const string MaterialKeyDiffuse = "$clr.diffuse";
+    private const string MaterialKeyTwoSided = "$mat.twosided";
+
+    /// <summary>The material name Assimp synthesizes for formats that carry none (STL, PLY); see <see cref="ConvertMaterial"/>.</summary>
+    private const string SyntheticDefaultMaterialName = "DefaultMaterial";
 
     /// <summary>Default appearance for material-less files (e.g. STL) — matching the Robot layer's default URDF gray.</summary>
     private static readonly Vector4 DefaultBaseColor = new(0.78f, 0.78f, 0.78f, 1f);
+
+    /// <summary>
+    /// The binding's function table. <c>Assimp.GetApi()</c> hands back one cached instance and locates the
+    /// native library on first use, so it is neither per-call nor disposable — holding it statically is
+    /// exactly what the binding expects.
+    /// </summary>
+    private static readonly Assimp Api = Assimp.GetApi();
 
     /// <summary>
     /// Imports an entire model file (one Assimp parse) and returns all submeshes (geometry + material).
@@ -53,26 +77,33 @@ public static class AssimpModelLoader
 
         options ??= LoadOptions.Default;
 
-        AScene scene;
-        using (var importer = new AssimpContext())
-        {
-            scene = importer.ImportFile(fullPath, ImportSteps)
-                ?? throw new InvalidOperationException($"Model import failed (Assimp returned an empty scene): {fullPath}");
-        }
-
         string modelDirectory = Path.GetDirectoryName(fullPath) ?? string.Empty;
-        var meshes = new List<LoadedMesh>(scene.Meshes?.Count ?? 0);
-        if (scene.Meshes is not null)
+
+        AScene* scene = Api.ImportFile(fullPath, ImportSteps);
+        if (scene is null)
+            throw new InvalidOperationException(
+                $"Model import failed (Assimp returned an empty scene): {fullPath}. {Api.GetErrorStringS()}");
+
+        var meshes = new List<LoadedMesh>((int)scene->MNumMeshes);
+        try
         {
-            foreach (Mesh mesh in scene.Meshes)
+            for (uint i = 0; i < scene->MNumMeshes; i++)
             {
-                if (mesh.VertexCount <= 0)
+                Mesh* mesh = scene->MMeshes[i];
+                if (mesh->MNumVertices == 0)
                 {
-                    Logger.Warning($"[Import] Skipping empty mesh '{mesh.Name}' ({fullPath}).");
+                    Logger.Warning($"[Import] Skipping empty mesh '{mesh->MName.AsString}' ({fullPath}).");
                     continue;
                 }
+
                 meshes.Add(ConvertMesh(scene, mesh, modelDirectory, options));
             }
+        }
+        finally
+        {
+            // Everything above was already copied into MeshData / MaterialData; the native tree is freed
+            // here, and the finally keeps a throw mid-loop from leaking it.
+            Api.ReleaseImport(scene);
         }
 
         if (meshes.Count == 0)
@@ -98,70 +129,57 @@ public static class AssimpModelLoader
     // Assimp data → Core data
     // ------------------------------------------------------------------
 
-    private static LoadedMesh ConvertMesh(AScene scene, Mesh mesh, string modelDirectory, LoadOptions options)
+    private static LoadedMesh ConvertMesh(AScene* scene, Mesh* mesh, string modelDirectory, LoadOptions options)
     {
         var meshData = new MeshData();
-        int count = mesh.VertexCount;
+        int count = (int)mesh->MNumVertices;
 
-        // Defensive handling of missing channels: use compliant placeholders so parallel arrays stay equal in length.
-        bool hasNormals = mesh.HasNormals && mesh.Normals is { Count: > 0 } && mesh.Normals.Count == count;
-        bool hasTangents = mesh.HasTangentBasis && mesh.Tangents is { Count: > 0 } && mesh.Tangents.Count == count;
-        List<Vector3D>? uvChannel =
-            mesh.TextureCoordinateChannels is { Length: > 0 } ? mesh.TextureCoordinateChannels[0] : null;
-        bool hasUvs = uvChannel is { Count: > 0 } && uvChannel.Count == count;
+        // Defensive handling of missing channels: every array below is optional in assimp, so a missing one
+        // falls back to a placeholder and the parallel arrays stay equal in length.
+        bool hasNormals = mesh->MNormals is not null;
+        bool hasTangents = mesh->MTangents is not null;
+        Vector3* uv0 = mesh->MTextureCoords[0];
+        bool hasUvs = uv0 is not null;
 
         float scale = options.GlobalScale ?? 1f;
 
         for (int i = 0; i < count; i++)
         {
-            Vector3D p = mesh.Vertices[i];
-            var position = scale == 1f
-                ? new Vector3(p.X, p.Y, p.Z)
-                : new Vector3(p.X * scale, p.Y * scale, p.Z * scale);
+            Vector3 p = mesh->MVertices[i];
+            var position = scale == 1f ? p : p * scale;
 
-            Vector3 normal = hasNormals
-                ? new Vector3(mesh.Normals[i].X, mesh.Normals[i].Y, mesh.Normals[i].Z)
-                : Vector3.UnitZ;
-
-            Vector2 uv = hasUvs && uvChannel is { } uv0
-                ? new Vector2(uv0[i].X, options.FlipUvV ? 1f - uv0[i].Y : uv0[i].Y)
-                : Vector2.Zero;
-
-            Vector3 tangent = hasTangents
-                ? new Vector3(mesh.Tangents[i].X, mesh.Tangents[i].Y, mesh.Tangents[i].Z)
-                : Vector3.UnitX;
+            Vector3 normal = hasNormals ? mesh->MNormals[i] : Vector3.UnitZ;
+            Vector2 uv = hasUvs ? new Vector2(uv0[i].X, options.FlipUvV ? 1f - uv0[i].Y : uv0[i].Y) : Vector2.Zero;
+            Vector3 tangent = hasTangents ? mesh->MTangents[i] : Vector3.UnitX;
 
             meshData.AddVertex(position, normal, uv, tangent);
         }
 
         // Vertices are written in order (index i → i); reuse face indices as-is.
-        foreach (Face face in mesh.Faces)
+        for (uint f = 0; f < mesh->MNumFaces; f++)
         {
-            if (!face.HasIndices || face.IndexCount < 3)
+            Face face = mesh->MFaces[f];
+            if (face.MIndices is null || face.MNumIndices < 3)
                 continue;
 
-            uint a = (uint)face.Indices[0];
-            uint b = (uint)face.Indices[1];
-            uint c = (uint)face.Indices[2];
+            uint a = face.MIndices[0];
+            uint b = face.MIndices[1];
+            uint c = face.MIndices[2];
             if (options.FlipWinding)
                 (b, c) = (c, b);
             meshData.AddTriangle(a, b, c);
         }
 
-        return new LoadedMesh(mesh.Name, meshData, ConvertMaterial(scene, mesh, modelDirectory));
+        return new LoadedMesh(mesh->MName.AsString, meshData, ConvertMaterial(scene, mesh, modelDirectory));
     }
 
-    private static MaterialData ConvertMaterial(AScene scene, Mesh mesh, string modelDirectory)
+    private static MaterialData ConvertMaterial(AScene* scene, Mesh* mesh, string modelDirectory)
     {
         var data = new MaterialData { BaseColor = DefaultBaseColor };
 
-        Material? material = null;
-        if (scene.Materials is not null
-            && mesh.MaterialIndex >= 0
-            && mesh.MaterialIndex < scene.Materials.Count)
-        {
-            material = scene.Materials[mesh.MaterialIndex];
-        }
+        Material* material = mesh->MMaterialIndex < scene->MNumMaterials
+            ? scene->MMaterials[mesh->MMaterialIndex]
+            : null;
 
         if (material is null)
             return data; // No material (old STL / tool export): default appearance.
@@ -173,19 +191,17 @@ public static class AssimpModelLoader
         // Assimp synthesizes a white "DefaultMaterial" for material-less formats (like STL), which is not
         // the file's real appearance. In that case, with no texture/two-sided flag, treat it as "no valid
         // material" and use default gray rather than pure white.
-        bool isSyntheticDefault = string.Equals(material.Name, "DefaultMaterial", StringComparison.Ordinal)
+        bool isSyntheticDefault =
+            string.Equals(ReadMaterialName(material), SyntheticDefaultMaterialName, StringComparison.Ordinal)
             && !hasDiffuseTex && !hasNormalTex
-            && !(material.HasTwoSided && material.IsTwoSided);
+            && !IsTwoSided(material);
 
         if (!isSyntheticDefault)
         {
-            if (material.HasColorDiffuse)
-            {
-                Color4D c = material.ColorDiffuse;
-                data.BaseColor = new Vector4(c.R, c.G, c.B, c.A);
-            }
+            if (TryGetDiffuseColor(material, out Vector4 color))
+                data.BaseColor = color;
 
-            if (material.HasTwoSided && material.IsTwoSided)
+            if (IsTwoSided(material))
                 data.DoubleSided = true;
         }
 
@@ -198,20 +214,60 @@ public static class AssimpModelLoader
         return data;
     }
 
-    /// <summary>Fetches the first valid texture slot of the given type. AssimpNet has no count API, so probe until false.</summary>
-    private static bool TryFindTexture(Material material, TextureType type, out string? filePath)
+    /// <summary>Reads <c>AI_MATKEY_NAME</c>; null when the file itself names no material.</summary>
+    private static string? ReadMaterialName(Material* material)
+    {
+        AssimpString name = default;
+        return Api.GetMaterialString(material, MaterialKeyName, 0, 0, &name) == Return.Success ? name.AsString : null;
+    }
+
+    /// <summary>Reads <c>AI_MATKEY_COLOR_DIFFUSE</c> (assimp accepts three or four components).</summary>
+    private static bool TryGetDiffuseColor(Material* material, out Vector4 color)
+    {
+        // A ref/out parameter is not a fixed variable, so the address is taken through a local.
+        Vector4 value = default;
+        bool found = Api.GetMaterialColor(material, MaterialKeyDiffuse, 0, 0, &value) == Return.Success;
+        color = value;
+        return found;
+    }
+
+    /// <summary>
+    /// Reads <c>AI_MATKEY_TWOSIDED</c>. Non-zero means "on": assimp stores the flag as a plain int and
+    /// importers write either 1 or -1 for true, so only 0 counts as single-sided.
+    /// </summary>
+    private static bool IsTwoSided(Material* material)
+    {
+        int value = 0;
+        uint componentCount = 0;
+        return Api.GetMaterialIntegerArray(material, MaterialKeyTwoSided, 0, 0, &value, &componentCount) == Return.Success
+               && value != 0;
+    }
+
+    /// <summary>Fetches the first texture of the given type that names a path. Assimp has no count API, so probe until it fails.</summary>
+    private static bool TryFindTexture(Material* material, TextureType type, out string? filePath)
     {
         filePath = null;
-        for (int i = 0; ; i++)
+        for (uint i = 0; ; i++)
         {
-            if (!material.GetMaterialTexture(type, i, out TextureSlot slot))
+            AssimpString path = default;
+            TextureMapping mapping = default;
+            uint uvIndex = 0;
+            float blend = 0;
+            TextureOp op = default;
+            TextureMapMode mapMode = default;
+            uint flags = 0;
+
+            if (Api.GetMaterialTexture(material, type, i, &path, &mapping, &uvIndex, &blend, &op, &mapMode, &flags)
+                != Return.Success)
                 break;
-            if (!string.IsNullOrWhiteSpace(slot.FilePath))
+
+            if (!string.IsNullOrWhiteSpace(path.AsString))
             {
-                filePath = slot.FilePath;
+                filePath = path.AsString;
                 return true;
             }
         }
+
         return false;
     }
 
@@ -221,18 +277,27 @@ public static class AssimpModelLoader
     /// unsupported textures only warn and return null.
     /// </summary>
     private static TextureReference? ResolveTexture(
-        AScene scene, string path, string modelDirectory, TextureColorSpace colorSpace)
+        AScene* scene, string path, string modelDirectory, TextureColorSpace colorSpace)
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
 
         if (IsEmbeddedTexturePath(path, out int index)
-            && scene.Textures is { Count: > 0 } textures
-            && index >= 0 && index < textures.Count)
+            && scene->MTextures is not null
+            && index >= 0 && index < scene->MNumTextures)
         {
-            EmbeddedTexture embedded = textures[index];
-            if (embedded.HasCompressedData && embedded.CompressedData is { Length: > 0 })
-                return TextureReference.FromData(embedded.CompressedData, colorSpace);
+            Texture* embedded = scene->MTextures[index];
+            if (embedded->PcData is not null && embedded->MWidth > 0)
+            {
+                // A compressed embedded texture is stored as the encoded file itself: assimp puts the byte
+                // length in mWidth and leaves mHeight at 0. Copy the bytes out (nothing may outlive the
+                // scene) and let the backend decode them exactly as it decodes an external file.
+                if (embedded->MHeight == 0)
+                {
+                    byte[] bytes = new ReadOnlySpan<byte>((byte*)embedded->PcData, (int)embedded->MWidth).ToArray();
+                    return TextureReference.FromData(bytes, colorSpace);
+                }
+            }
 
             // Uncompressed embedded textures are raw RGBA pixels with no ready encoding path (the backend
             // decodes from files), so skip them in v1.

@@ -21,6 +21,7 @@ public sealed class LineData
     /// <summary>Number of segments.</summary>
     public int SegmentCount => _positions.Count / 2;
 
+    /// <summary>Segment endpoints, two consecutive entries per segment (GL_LINES order).</summary>
     public IReadOnlyList<Vector3> Positions => _positions;
 
     /// <summary>Whether per-vertex coloring is enabled (true once at least one segment carries a color).</summary>

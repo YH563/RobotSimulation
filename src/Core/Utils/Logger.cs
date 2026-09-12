@@ -83,12 +83,25 @@ public static class Logger
 
     // ---- Convenience methods (category fixed to DefaultCategory) ----
 
+    /// <summary>Writes a trace-level line (the most verbose level).</summary>
     public static void Trace(string message) => Log(LogLevel.Trace, message);
+
+    /// <summary>Writes a debug-level line.</summary>
     public static void Debug(string message) => Log(LogLevel.Debug, message);
+
+    /// <summary>Writes an informational line (the level hosts use for progress output).</summary>
     public static void Info(string message) => Log(LogLevel.Information, message);
+
+    /// <summary>Writes a warning line (e.g. a skipped test-data file).</summary>
     public static void Warning(string message) => Log(LogLevel.Warning, message);
+
+    /// <summary>Writes an error line with an optional exception.</summary>
     public static void Error(string message, Exception? ex = null) => Log(LogLevel.Error, message, ex);
+
+    /// <summary>Writes an error line built from an exception (its message, with the exception attached).</summary>
     public static void Error(Exception ex) => Log(LogLevel.Error, ex.Message, ex);
+
+    /// <summary>Writes a critical line with an optional exception.</summary>
     public static void Critical(string message, Exception? ex = null) => Log(LogLevel.Critical, message, ex);
 
     // ---- Category support: use when routing/filtering per subsystem ----
