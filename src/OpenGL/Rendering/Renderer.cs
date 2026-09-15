@@ -28,16 +28,23 @@ public sealed class Renderer : IRenderer
     /// <summary>Exponential moving-average factor for frame-time smoothing (0~1; smaller = smoother).</summary>
     private const double FrameSmoothing = 0.1;
 
+    /// <summary>Frames between two sweeps of the GPU resource caches.</summary>
+    private const int SweepIntervalFrames = 120;
+
+    /// <summary>Frames a cached resource may go unused before its buffers are released.</summary>
+    private const int MaxIdleFrames = 240;
+
     private readonly GL _gl;
     private readonly ShaderProgram _modelShader;
     /// <summary>Maximum point size supported by the driver (GL_POINT_SIZE_RANGE upper bound), used to clamp uPointSize when drawing point clouds.</summary>
     private readonly float _maxPointSize;
 
     private readonly Dictionary<RenderPassKind, ShaderProgram> _passShaders;
-    private readonly Dictionary<MeshData, Mesh> _meshCache = new();
-    private readonly Dictionary<LineData, LineMesh> _lineCache = new();
-    private readonly Dictionary<PointCloud2Data, PointMesh> _pointCache = new();
-    private readonly Dictionary<MaterialData, Material> _materialCache = new();
+    private readonly Dictionary<MeshData, Cached<Mesh>> _meshCache = new();
+    private readonly Dictionary<LineData, Cached<LineMesh>> _lineCache = new();
+    private readonly Dictionary<PointCloud2Data, Cached<PointMesh>> _pointCache = new();
+    private readonly Dictionary<MaterialData, Cached<Material>> _materialCache = new();
+    private long _lastSweepFrame;
     private bool _disposed;
 
     private readonly Stopwatch _frameClock = new();
@@ -114,6 +121,7 @@ public sealed class Renderer : IRenderer
             throw new ObjectDisposedException(nameof(Renderer));
 
         UpdateStats();
+        SweepUnusedCaches();
 
         Matrix4x4 view = scene.Camera.GetViewMatrix();
         Matrix4x4 projection = scene.Camera.GetProjectionMatrix();
@@ -295,7 +303,11 @@ public sealed class Renderer : IRenderer
         // GL_PROGRAM_POINT_SIZE is enabled at construction; clamp the size within [1, driver max].
         shader.SetUniform("uPointSize", MathF.Max(1f, MathF.Min(node.PointSize, _maxPointSize)));
 
-        GetOrCreate(_pointCache, data, () => new PointMesh(_gl, data)).Draw();
+        // The mesh owns the upload policy: it does nothing while the cloud's revision is unchanged,
+        // and otherwise uploads only the changed slots (never the whole cloud on an ordinary update).
+        PointMesh mesh = GetOrCreate(_pointCache, data, () => new PointMesh(_gl, data));
+        mesh.Sync(data);
+        mesh.Draw();
     }
 
     /// <summary>Toggles global GL state (culling / polygon mode) per the material's render state bits.</summary>
@@ -337,16 +349,78 @@ public sealed class Renderer : IRenderer
         => new(_gl, reference);
 
     /// <summary>Gets the cached value by reference key, creating and caching it via the factory on a miss.</summary>
-    private static T GetOrCreate<TKey, T>(Dictionary<TKey, T> cache, TKey key, Func<T> factory)
+    /// <remarks>Also stamps the entry with the current frame, which is what the sweeper expires entries by.</remarks>
+    private T GetOrCreate<TKey, T>(Dictionary<TKey, Cached<T>> cache, TKey key, Func<T> factory)
         where TKey : notnull
     {
-        if (!cache.TryGetValue(key, out T? value))
+        if (!cache.TryGetValue(key, out Cached<T>? entry))
         {
-            value = factory();
-            cache[key] = value;
+            entry = new Cached<T>(factory(), _frameCount);
+            cache[key] = entry;
         }
 
-        return value;
+        entry.LastFrame = _frameCount;
+        return entry.Value;
+    }
+
+    /// <summary>
+    /// Releases cached GPU resources whose data has not been drawn for a while. Caches are keyed by the
+    /// data reference, so replacing an object's data (or dropping the object from the scene) would
+    /// otherwise keep the old GPU buffers alive until the renderer is disposed — a leak that grows with
+    /// every replacement, exactly the pattern an incrementally updated scene is most likely to hit.
+    /// </summary>
+    private void SweepUnusedCaches()
+    {
+        if (_frameCount - _lastSweepFrame < SweepIntervalFrames)
+            return;
+        _lastSweepFrame = _frameCount;
+
+        SweepUnused(_meshCache);
+        SweepUnused(_lineCache);
+        SweepUnused(_pointCache);
+        SweepUnused(_materialCache);
+    }
+
+    private void SweepUnused<TKey, T>(Dictionary<TKey, Cached<T>> cache)
+        where TKey : notnull
+        where T : IDisposable
+    {
+        if (cache.Count == 0)
+            return;
+
+        List<TKey>? expired = null;
+        foreach (KeyValuePair<TKey, Cached<T>> entry in cache)
+        {
+            if (_frameCount - entry.Value.LastFrame > MaxIdleFrames)
+                (expired ??= new List<TKey>()).Add(entry.Key);
+        }
+
+        if (expired is null)
+            return;
+
+        foreach (TKey key in expired)
+        {
+            cache[key].Value.Dispose();
+            cache.Remove(key);
+        }
+    }
+
+    /// <summary>A cached GPU resource plus the last frame that used it.</summary>
+    private sealed class Cached<T>
+    {
+        /// <param name="value">The GPU resource.</param>
+        /// <param name="frame">Frame the resource was created on.</param>
+        public Cached(T value, long frame)
+        {
+            Value = value;
+            LastFrame = frame;
+        }
+
+        /// <summary>The GPU resource.</summary>
+        public T Value { get; }
+
+        /// <summary>Last frame that asked for this resource.</summary>
+        public long LastFrame { get; set; }
     }
 
     /// <summary>
@@ -358,19 +432,20 @@ public sealed class Renderer : IRenderer
         if (_disposed)
             return;
 
-        DisposeAll(_meshCache.Values);
-        DisposeAll(_lineCache.Values);
-        DisposeAll(_pointCache.Values);
-        DisposeAll(_materialCache.Values);
+        DisposeAll(_meshCache);
+        DisposeAll(_lineCache);
+        DisposeAll(_pointCache);
+        DisposeAll(_materialCache);
         foreach (ShaderProgram shader in _passShaders.Values)
             shader.Dispose();
         _disposed = true;
     }
 
-    private static void DisposeAll<T>(IEnumerable<T> resources)
+    private static void DisposeAll<TKey, T>(Dictionary<TKey, Cached<T>> cache)
+        where TKey : notnull
         where T : IDisposable
     {
-        foreach (T resource in resources)
-            resource.Dispose();
+        foreach (Cached<T> entry in cache.Values)
+            entry.Value.Dispose();
     }
 }

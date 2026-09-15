@@ -44,6 +44,7 @@ public static class GraphicsFactory
 - 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。
 - `HighlightBlend = 0.30f`：高亮混合系数。
 - `FrameStats Stats`：帧时序统计（`Fps` / 最近帧与平滑帧耗时 / `FrameCount`），由两次 `Render` 调用间隔经指数滑动平均得到；在渲染线程更新。
+- 每帧开头的缓存清扫：GPU 资源缓存按帧打戳，连续 240 帧未被任何节点用到的条目会被释放——这样替换某个对象的数据（或把它移出场景）不会把它旧的 GPU 缓冲一直留到渲染器销毁；点云绘制前先 `PointMesh.Sync(data)` 拉取同步，修订号未变则完全不做任何上传。
 - 出于安全，`Render` 从渲染线程调用；`_disposed` 后会抛 `ObjectDisposedException`。
 
 构造函数需要 `GraphicsContext`（设备层），宿主经 `GraphicsFactory.Create(gl)` 得到。
@@ -58,7 +59,7 @@ public static class GraphicsFactory
 |---|---|
 | `Mesh` | GPU 网格（VAO/VBO/EBO）；顶点布局由 `VertexLayout` 定义；`Draw()` 以三角形列表绘制 |
 | `LineMesh` | GPU 线段缓冲（`GL_LINES`），对应 `LineData`；可选逐顶点颜色 |
-| `PointMesh` | GPU 点缓冲（`GL_POINTS`），对应 `PointCloud2Data`；可选逐顶点颜色，点尺寸为 uniform |
+| `PointMesh` | GPU 点缓冲（`GL_POINTS`），对应 `PointCloud2Data`；可选逐顶点颜色，点尺寸为 uniform；`Sync(data)` 按修订号增量上传（只对变更槽位 `BufferSubData`，仅在容量变化时重建缓冲），环形折返时 `Draw()` 最多两次 `DrawArrays` |
 | `Material` | GPU 材质：持有着色器与已上传纹理；`Apply(MaterialData)` 写入外观参数 |
 | `Texture2D` | GPU 二维纹理：从`TextureReference`（文件或内存）创建，按 `TextureColorSpace` 决定 sRGB/线性内格式；可生成 mipmap |
 | `ShaderProgram` | 着色器程序与 uniform 缓存；`Use()` / `SetUniform(...)`（多样式重载） |

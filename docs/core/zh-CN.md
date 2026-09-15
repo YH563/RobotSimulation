@@ -153,9 +153,17 @@ ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述�
 | `FrameId` | 可选来源/坐标系标识 |
 | `Fields` / `PointStep` | 字段描述 / 每点字节数 |
 | `Width` / `Height` / `Count` / `IsOrganized` | 组织信息 / 点数 / 是否组织化（Height>1） |
+| `Capacity` / `FirstSlot` | 槽位总数 / 逻辑 0 号点（最旧）所在物理槽位 |
+| `Revision` / `Dirty` | 内容修订号 / 自上次 `ResetDirty` 以来累积的变更窗口（`DirtyWindow`） |
 | `HasColor` | 是否携带可解析颜色通道 |
 
-方法：构造 `(PointField[] fields, byte[] data, int pointStep, string? frameId = null, int width = 0, int height = 1)`、`float[] ToPositionArray()`、`float[]? ToColorArray()`（无颜色通道返 null，由渲染器用材质统一色）、静态 `FromPositions(IEnumerable<Vector3>, frameId?)`。
+方法：构造 `(PointField[] fields, byte[] data, int pointStep, string? frameId = null, int width = 0, int height = 1)`、`float[] ToPositionArray()`、`float[]? ToColorArray()`（无颜色通道返 null，由渲染器用材质统一色）、静态 `FromPositions(IEnumerable<Vector3>, frameId?)`（包装已有缓冲，整块即全部点）、静态 `CreateMutable(int initialCapacity = 0, bool withColor = false, string? frameId = null)`（容量已预留但点数为 0 的可增长点云，`withColor` 时布局带 r/g/b float 通道）。
+
+**增量更新**（面向传感器流/实时建图）。写入：`AddPoint(p)`、`AddPoint(p, color)`、`AddPoints(ReadOnlySpan<Vector3>)`、`AddPoints(positions, colors)`、`AppendRawPoint(ReadOnlySpan<byte>)`（整点字节原样写入）、`SetPoint(i, p)`、`SetColor(i, c)`；删除：`RemoveOldest(n)`、`TrimTo(max)`、`Clear()`；容量：`EnsureCapacity(n)`。追加写在写游标处、驱逐只前移 `FirstSlot`——已有点的数据既不搬动也不重传。
+
+- **逻辑索引** 0 = 最旧、`Count-1` = 最新，公开 API 均用逻辑索引；**物理槽位**由 `FirstSlot` / `Capacity` 推出，仅供后端上传：`GetSlotRuns(start, count, runs)` 把逻辑区间拆成至多两段物理区间，`CopySlotPositions` / `CopySlotColors` 按槽位区间导出（`CopyPositionsTo` / `CopyColorsTo` / `ToPositionArray` 按逻辑顺序导出）。
+- **变更窗口**：`Revision` 每次内容变化自增；`Dirty` 给出逻辑区间 `[Start, Start+Count)` 与窗口起点修订号 `FromRevision`。后端若已上传到 `FromRevision`，只需上传该区间，否则全量；上传完成后调 `ResetDirty()` 推进窗口。驱逐不改变窗口起点（否则"先驱逐再追加"这种每帧序列会退化成全量重传），但会把窗口索引随点一起前移；容量增长会把环形拉直（`FirstSlot` 归 0）并把全部有效点标脏。
+- **约束**：组织化点云（`Height > 1`）拒绝追加（抛 `InvalidOperationException`）；追加只写位置，其余通道填空值 0（`AddPoint(p, color)` / `AppendRawPoint` 可显式给值）；强度（intensity）灰度映射的 min/max 缓存会在写入/驱逐后失效，下一次取色重算。
 
 - `PointField`: `Name` / `Offset` / `DataType` / `Count`；静态 `GetElementSize(type)`；`Size`（每点字节 footprint）。
 - `PointFieldDataType`: `Int8/UInt8/Int16/UInt16/Int32/UInt32/Float32/Float64`（数值与 ROS datatype 一致）。

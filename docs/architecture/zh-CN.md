@@ -133,6 +133,7 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-019 | `GameObject` 每帧逻辑改为「组合注入」：节点挂载 `IUpdateBehavior` 行为列表，`GameObject.Update` 变为非虚派发器 | 逻辑可运行时增删/暂停/单测；`sealed` 与解析产出的节点也能扩展，无需子类 |
 | ADR-020 | 文件夹与命名空间刻意解耦：文件夹可细于命名空间，重排文件夹**不改** `namespace`（由 `.editorconfig` 关闭 IDE0130 固定） | 保住对外 API 契约；文件夹只是仓库内部组织方式 |
 | ADR-021 | URDF 资产查找改为「根回退链」：显式 `assetDirectory`（优先）→ URDF 同级目录（默认）；`package://` 的**包名一律丢弃** | 用显式资源根取代启发式猜测（`assetDirectory` ＝ MuJoCo `meshdir`）；标准 ROS 的 `urdf/`+`meshes/` 布局无需改 URDF 即可加载 |
+| ADR-022 | 点云增量更新：数据层「可增长缓冲 + 环形起点 + 修订号/变更窗口」，后端拉取式局部上传（`PointMesh.Sync`），并按帧戳回收 GPU 资源缓存 | 追加不搬数据、驱逐只移动环形起点 → 每帧只上传新增的几个点；`Revision` 未变则一个字节也不传 |
 
 ---
 

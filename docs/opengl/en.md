@@ -44,6 +44,7 @@ Device layer: holds the `GL` instance, manages viewport, clear, and device capab
 - Light params (`MaxLights = 8`) collected per frame and written into model-shader uniform arrays.
 - `HighlightBlend = 0.30f`: highlight blend factor.
 - `FrameStats Stats`: frame timing (`Fps` / last & smoothed frame ms / `FrameCount`), measured from the interval between `Render` calls with an exponential moving average; updated on the render thread.
+- Cache sweep at the start of each frame: GPU resources are stamped with the frame that used them and an entry idle for 240 frames is released, so replacing an object's data (or dropping the object from the scene) does not keep its old GPU buffers alive until the renderer is disposed. Point clouds are pulled into sync with `PointMesh.Sync(data)` before drawing, and nothing is uploaded at all while the data's revision is unchanged.
 - For safety, `Render` is called from the render thread; after `_disposed`, throws `ObjectDisposedException`.
 
 The ctor needs a `GraphicsContext` (device layer), obtained by the host via `GraphicsFactory.Create(gl)`.
@@ -58,7 +59,7 @@ These types are backend implementation details; `public` only for same-assembly/
 |---|---|
 | `Mesh` | GPU mesh (VAO/VBO/EBO); vertex layout defined by `VertexLayout`; `Draw()` draws as triangle list |
 | `LineMesh` | GPU line buffer (`GL_LINES`), for `LineData`; optional per-vertex color |
-| `PointMesh` | GPU point buffer (`GL_POINTS`), for `PointCloud2Data`; optional per-vertex color, point size is a uniform |
+| `PointMesh` | GPU point buffer (`GL_POINTS`), for `PointCloud2Data`; optional per-vertex color, point size is a uniform; `Sync(data)` uploads incrementally by revision (only the changed slots via `BufferSubData`, the store is rebuilt only when the capacity changes) and `Draw()` issues at most two `DrawArrays` when the ring wraps |
 | `Material` | GPU material: owns shader + uploaded textures; `Apply(MaterialData)` writes appearance params |
 | `Texture2D` | GPU 2D texture: from `TextureReference` (file or memory), sRGB/linear internal format per `TextureColorSpace`; can gen mipmaps |
 | `ShaderProgram` | Shader program + uniform cache; `Use()` / `SetUniform(...)` (multi-overload) |

@@ -153,9 +153,17 @@ ROS `sensor_msgs/PointCloud2` style: a flat byte buffer + field descriptions. Ea
 | `FrameId` | Optional origin/frame id |
 | `Fields` / `PointStep` | Field descriptions / bytes per point |
 | `Width` / `Height` / `Count` / `IsOrganized` | Organization / point count / organized (Height>1) |
+| `Capacity` / `FirstSlot` | Slot count / physical slot of logical point 0 (the oldest) |
+| `Revision` / `Dirty` | Content revision / change window accumulated since the last `ResetDirty` (`DirtyWindow`) |
 | `HasColor` | Whether a parseable color channel exists |
 
-Methods: ctor `(PointField[] fields, byte[] data, int pointStep, string? frameId = null, int width = 0, int height = 1)`, `float[] ToPositionArray()`, `float[]? ToColorArray()` (null if no color channel; renderer uses the material's uniform color), static `FromPositions(IEnumerable<Vector3>, frameId?)`.
+Methods: ctor `(PointField[] fields, byte[] data, int pointStep, string? frameId = null, int width = 0, int height = 1)`, `float[] ToPositionArray()`, `float[]? ToColorArray()` (null if no color channel; renderer uses the material's uniform color), static `FromPositions(IEnumerable<Vector3>, frameId?)` (wraps an existing buffer, every slot is a point), static `CreateMutable(int initialCapacity = 0, bool withColor = false, string? frameId = null)` (a growable cloud whose store is reserved but still empty; `withColor` gives the layout an r/g/b float channel).
+
+**Incremental updates** (for a live sensor stream / incremental mapping). Writes: `AddPoint(p)`, `AddPoint(p, color)`, `AddPoints(ReadOnlySpan<Vector3>)`, `AddPoints(positions, colors)`, `AppendRawPoint(ReadOnlySpan<byte>)` (one pre-encoded point, copied verbatim), `SetPoint(i, p)`, `SetColor(i, c)`; removals: `RemoveOldest(n)`, `TrimTo(max)`, `Clear()`; capacity: `EnsureCapacity(n)`. Appending writes at the write cursor and eviction only advances `FirstSlot`, so the data of existing points is neither moved nor re-uploaded.
+
+- **Logical index** 0 is the oldest point and `Count-1` the newest; the public API is logical throughout. **Physical slots** follow from `FirstSlot` / `Capacity` and exist for the backend: `GetSlotRuns(start, count, runs)` splits a logical range into at most two contiguous slot runs, `CopySlotPositions` / `CopySlotColors` export by slot (while `CopyPositionsTo` / `CopyColorsTo` / `ToPositionArray` export in logical order).
+- **Change window**: `Revision` increments on every content change; `Dirty` reports the logical range `[Start, Start+Count)` plus the revision the window started at (`FromRevision`). A backend that has already uploaded up to `FromRevision` only has to upload that range, anything else uploads everything; after uploading it calls `ResetDirty()`. Eviction deliberately leaves the window start alone (otherwise the ordinary "evict then append" frame would degrade into a full re-upload) but shifts the window's indices with the points; growth unrolls the ring (`FirstSlot` back to 0) and marks every valid point dirty.
+- **Constraints**: an organized cloud (height > 1) refuses appends (`InvalidOperationException`); an append writes only the position and zero-fills the other channels (`AddPoint(p, color)` / `AppendRawPoint` pass values explicitly); the cached min/max of the intensity greyscale mapping is invalidated by writes and evictions, so the next color read recomputes it.
 
 - `PointField`: `Name` / `Offset` / `DataType` / `Count`; static `GetElementSize(type)`; `Size`.
 - `PointFieldDataType`: `Int8/UInt8/Int16/UInt16/Int32/UInt32/Float32/Float64` (values match ROS datatypes).

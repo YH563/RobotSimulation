@@ -134,6 +134,7 @@ Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag (packed as embedded resour
 | ADR-019 | Per-frame logic on `GameObject` switched to **composition injection**: a node carries an `IUpdateBehavior` list and `GameObject.Update` becomes a non-virtual dispatcher | logic can be added/removed, paused, and unit-tested at runtime; `sealed` and parsed nodes extend without a subclass |
 | ADR-020 | Folders and namespaces are deliberately decoupled: a folder may be finer than its namespace, and reorganizing folders **never** changes `namespace` (locked by `.editorconfig` disabling IDE0130) | protects the public API contract; folders are internal organization only |
 | ADR-021 | URDF asset lookup became a **root fallback chain**: explicit `assetDirectory` first, the URDF's sibling directory second; a `package://` **package name is always discarded** | replaces heuristic guessing with an explicit asset root (`assetDirectory` = MuJoCo's `meshdir`); the standard ROS `urdf/`+`meshes/` layout now loads without editing the URDF |
+| ADR-022 | Incremental point clouds: a growable store with a ring start plus a revision / change window in the data layer, pull-style partial uploads in the backend (`PointMesh.Sync`), and frame-stamped GPU cache collection | appending moves no data and eviction only moves the ring start, so a frame uploads just the new points — and nothing at all while `Revision` is unchanged |
 
 ---
 
