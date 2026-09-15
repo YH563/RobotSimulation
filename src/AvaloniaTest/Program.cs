@@ -49,10 +49,30 @@ internal static class Program
     }
 
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+    {
+        var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();
+
+        // 仅在 Windows 上强制使用 WGL（原生 OpenGL）渲染。
+        // Linux/macOS 不应用此选项，保持原有正常的 OpenGL 行为。
+        if (OperatingSystem.IsWindows())
+        {
+            builder = builder.With(new Win32PlatformOptions
+            {
+                // 按顺序尝试：优先 WGL，失败则回退到 ANGLE 或软件渲染
+                RenderingMode = new[]
+                {
+                Win32RenderingMode.Wgl,
+                Win32RenderingMode.AngleEgl,
+                Win32RenderingMode.Software
+            }
+            });
+        }
+
+        return builder;
+    }
 
     /// <summary>
     /// <c>--smoke [frames]</c> switches to the CI smoke mode; there is no other switch (the bare-window
