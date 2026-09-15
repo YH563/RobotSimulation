@@ -6,3 +6,4 @@
 *.snupkg
 artifacts/
 *.DotSettings.user
+.vs/
