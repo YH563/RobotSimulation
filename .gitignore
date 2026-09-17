@@ -7,3 +7,4 @@
 artifacts/
 *.DotSettings.user
 .vs/
+.vscode/
