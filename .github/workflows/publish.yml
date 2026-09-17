@@ -34,6 +34,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 每次运行都先把自己「发布的是哪个提交」写进日志：手动触发时极易选错 ref，或误点
+      # "Re-run all jobs"（那会固定重跑当初那个旧提交，而不是最新代码），这一步让这一点一眼可见。
+      - name: Show what is being published
+        run: |
+          echo "ref    : $GITHUB_REF  ($GITHUB_REF_NAME)"
+          echo "commit : $(git rev-parse HEAD)"
+          git --no-pager log -1 --oneline --stat
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
