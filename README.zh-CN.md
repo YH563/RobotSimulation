@@ -30,7 +30,7 @@
 - **模型导入**: `AssimpModelLoader`（STL / OBJ / DAE / glTF 等），点云 `PointCloudIo`（PCD / PLY）。
 - **机器人**: `RobotModel`（URDF → 机器人 GameObject 树、is a `GameObject`）、`RobotState`（headless FK）、纯数据描述、可扩展的 `IAssetResolver`。
 - **自定义着色器**: OpenGL 后端内置完整 GLSL 管线（Model / Line / Point / Skybox / Axes）作为嵌入资源，架构上刻意让「着色器」成为可做到游戏引擎式的一等扩展点（详见 `docs/opengl/zh-CN.md`；单节点自定义着色器注入为下一步规划）。
-- **拾取**: `Camera.ScreenToWorldRay` → `SceneGraph.Pick` / `PickAndHighlight`（含高亮反馈）。
+- **拾取 / 选择反馈**: `Camera.ScreenToWorldRay` → `SceneGraph.Pick` / `PickAndSelect`（选中即高亮 + 显示该对象自身的坐标系——纯显示，库内没有拖拽手柄，反馈永远改不到机器人的关节姿态；`PickAndHighlight` 只做高亮）；另有渲染器绘制的无背景屏幕空间朝向 gizmo（`ShowOrientationGizmo`）。
 - **跨 UI 嵌入**: `Core` / `Robot` 完全不接触图形与窗口 API；`OpenGL` 只在"宿主自己的 GL 句柄必须穿过边界"处出现 Silk.NET（`GraphicsFactory.Create` / `CreateContext` 及经由它上传的资源类型）——后端与宿主可整体替换。
 
 ## 3. 安装 / Install
@@ -46,7 +46,7 @@ dotnet add package RobotSimulation.Robot
 dotnet add package RobotSimulation.OpenGL
 ```
 
-> 版本号与 `PackageId` 将在首次发布时确定；仓库当前以 `net10.0` 为目标框架。
+> 版本号与 `PackageId` 将在首次发布时确定；仓库当前以 `net8.0` 为目标框架。
 
 ## 4. 快速上手 / Quick Start
 
@@ -73,7 +73,7 @@ using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Robot;
 
-var scene = new SceneGraph();                       // 内置默认相机/灯光/网格/坐标轴
+var scene = new SceneGraph();                       // 内置默认相机/灯光/网格（世界坐标轴需手动开启）
 
 // 一个简单盒子图元
 scene.Add(new Box(1f, 0.5f, 0.2f, name: "base"));
@@ -146,7 +146,7 @@ dotnet run --project src/AvaloniaTest  -- --smoke 120
 dotnet run --project src/AvaloniaTest
 ```
 
-一次运行只装载**一个 URDF**（`fairino3_v6`）；地面网格、灯光、世界坐标轴与相机位姿全部来自库默认的 `SceneGraph`，窗口里再提供轨道相机（拖拽）、缩放（滚轮 / 右键拖拽）与点击选中高亮。仓库的 `Assets/` 里另备了一批可直接换用的样例——URDF 内置几何、社区 `urdf_tutorial` 包、全部五种 mesh 格式、两个 RGB 点云——以及生成它们的脚本；换用只需改一个常量。数据来源、如何新增或下载更多数据见 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。
+一次运行只装载**一个 URDF**（`fairino3_v6`）；地面网格、灯光与相机位姿全部来自库默认的 `SceneGraph`，右下角的屏幕空间朝向 gizmo 由渲染器绘制（世界坐标轴默认关闭，需要时手动开启），窗口里再提供轨道相机（拖拽）、缩放（滚轮 / 右键拖拽）与点击选中（高亮 + 显示该对象自身坐标系，纯显示不可拖动）。仓库的 `Assets/` 里另备了一批可直接换用的样例——URDF 内置几何、社区 `urdf_tutorial` 包、全部五种 mesh 格式、两个 RGB 点云——以及生成它们的脚本；换用只需改一个常量。数据来源、如何新增或下载更多数据见 [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md)。
 
 ## 5. 分模块文档 / Documentation
 
@@ -173,7 +173,7 @@ dotnet run --project src/AvaloniaTest
 - [x] 打包元数据（`PackageId` / 版本 / NuGet 元数据 / README / 许可）：由 `Directory.Build.props` 加各 `.csproj` 承担，已用 `dotnet pack` 验证——产出 3 个 `.nupkg` + 3 个 `.snupkg`，每个包都带 XML 文档、README 与一份 `LICENSE`。推送至源仍是单独的手动步骤。
 - [ ] `Visualization` 显示层（rviz-like Display）与外部写入协议（Sink）。
 - [ ] 三个宿主示例 / 测试项目：裸窗口、WPF、Avalonia——各一个 `RobotViewport` 式控件，既证明本库**可独立渲染显示**，也作为收编相关测试的载体。**已完成**：裸窗口（`src/BareWindowTest`）✔、Avalonia（`src/AvaloniaTest`）✔；WPF 待做。
-- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。**进行中**：`src/RobotSimulation.Tests`（xunit，14 项检查）已覆盖 URDF 解析与 `IAssetResolver` 路径解析的端到端行为，含只有 `assetDirectory` 才能加载的标准 ROS 布局 ✔；几何图元、射线拾取与 `RobotState` FK 待做。
+- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。**进行中**：`src/RobotSimulation.Tests`（xunit，**37 项检查**，四个文件）已覆盖 URDF 解析与 `IAssetResolver` 路径解析的端到端行为（含只有 `assetDirectory` 才能加载的标准 ROS 布局）✔、几何图元与射线拾取（表面点往返、窗口越大点击漂移越大、合成器视口与布局预测不一致）✔，以及默认 `SceneGraph` 与其选择契约 ✔；`RobotState` FK 待做。
 - [ ]（可选）额外的非 Silk 渲染后端。
 
 ---

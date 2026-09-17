@@ -41,6 +41,7 @@ public static class GraphicsFactory
 `Render(scene)` 遍历场景，把「数据 → GPU 资源」实例化并绘制。它拥有所有网格/材质/纹理缓存与释放生命周期。
 
 - 按 `RenderPassKind`（Model/Line/Point/Axes）分发；`Skybox` 为场景级未来背景通道，不由普通节点绘制。
+- 场景画完后，若 `SceneGraph.ShowOrientationGizmo` 打开，再画一趟朝向 gizmo（三支 RGB 箭头 + 原点小球，几何走 axes 通道，**不带背景底盘**）：它占视口右下角一个自己的方形视口（深度清理限定在 `glScissor` 框内，因为 `glClear` 不受视口影响），相机只取场景相机朝向、配正交投影 → 像素尺寸恒定；因此它永不被几何遮挡、也永不参与拾取。画完会把视口恢复为整屏——宿主可能只在尺寸变化时才设置视口。
 - 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。
 - `HighlightBlend = 0.30f`：高亮混合系数。
 - `FrameStats Stats`：帧时序统计（`Fps` / 最近帧与平滑帧耗时 / `FrameCount`），由两次 `Render` 调用间隔经指数滑动平均得到；在渲染线程更新。

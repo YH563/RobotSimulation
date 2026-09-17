@@ -3,15 +3,22 @@
 `src/BareWindowTest` and `src/AvaloniaTest` are the repository's end-to-end check and, at the same time,
 its **smallest embedding example**: each loads **one URDF robot** into a default scene, renders it, and
 prints a log both hosts share. The window has exactly three behaviours — an orbit camera (left-drag
-rotate, middle-drag pan, right-drag or the wheel zoom), pick-to-highlight, and the library's own grid
-floor and world axes. This page is about that **one file**: where it lives, where it comes from, and how
-to swap it.
+rotate, middle-drag pan, right-drag or the wheel zoom), pick-to-select (highlight plus the picked link's own local axes), and the library's own grid
+floor plus its screen-space orientation gizmo in the bottom-right corner. **Six pixels separate a click from a drag**: press and release inside that
+threshold is a click, anything beyond it is a drag. A click **does not move the camera** — the host
+restores the pose snapshot taken at press time and only then casts the ray, so that it is cast through
+the frame the user clicked on; otherwise a few pixels of hand jitter would turn "the link under this
+pixel" into "a link the ray has already drifted past". Clicking selects in one call
+(`SceneGraph.PickAndSelect`): the picked object is highlighted and the scene mounts its own local axes on it —
+display only, no drag affordance — so the link's frame is readable without touching the scene setup (or the model).
+This page is about that **one file**: where it
+lives, where it comes from, and how to swap it.
 
 ## 1. Where the data lives
 
 ```
-src/BareWindowTest/Assets/        # copied next to …/BareWindowTest/bin/<cfg>/net10.0/
-src/AvaloniaTest/Assets/          # copied next to …/AvaloniaTest/bin/<cfg>/net10.0/
+src/BareWindowTest/Assets/        # copied next to …/BareWindowTest/bin/<cfg>/net8.0/
+src/AvaloniaTest/Assets/          # copied next to …/AvaloniaTest/bin/<cfg>/net8.0/
 ├─ Models/
 │  ├─ fairino3_v6/                # ★ the one the hosts load: *.urdf + meshes/*.STL
 │  ├─ primitives.urdf             # spare sample: URDF built-in geometry (see §5)
@@ -44,8 +51,11 @@ contract. `--smoke [frames]` is the only switch either host accepts.
 STL import, the link/joint tree, materials and lighting — so the host loads only that one and stays small
 enough to read as an example.
 
-The camera is left alone as well: `SceneGraph`'s constructor already assembles the grid floor, lights,
-world axes and a usable camera pose, and the host just keeps them. That is precisely the promise this
+The camera is left alone as well: `SceneGraph`'s constructor already assembles the grid floor, lights and a
+usable camera pose, and the host just keeps them. Orientation feedback needs no setup either — the renderer
+draws the screen-space gizmo in the bottom-right corner of whatever viewport the host set — and neither does
+selection feedback: the click goes straight to `SceneGraph.PickAndSelect`, which highlights the picked link and
+mounts that link's own axes on it (a marker to read, never a handle to drag). That is precisely the promise this
 library makes to an embedder — after `new SceneGraph()` you already have a scene worth looking at, with
 nothing to tune.
 
@@ -67,28 +77,80 @@ Both hosts print the same lines, which is what makes them a cross-check of each 
 ```
 Smoke mode: rendering 120 frame(s), then exiting.
 GPU: Quadro P520/PCIe/SSE2 | vendor: NVIDIA Corporation | GL: 3.3.0 … | GLSL: 3.30 …
-Test data: …/bin/Debug/net10.0/Assets
+Test data: …/bin/Debug/net8.0/Assets
 Loading model: …/Assets/Models/fairino3_v6/fairino3_v6.urdf
 FPS 43.0 | last 19.21 ms | avg 23.24 ms | frames 29
 Smoke OK: rendered 120 frame(s) with no error.
 ```
 
-The **only** line allowed to differ between the two logs is the GL/GLSL version (Silk.NET reports 3.3 core,
-Avalonia 4.0). A missing file only produces a `warn:` line and skips that entry — a run never fails because
-of test data, so a half-added model is visible instead of fatal.
+Two lines differ by construction, because they describe the one thing a host has to decide for itself — how
+it obtains GL and how it sizes the viewport: the GL/GLSL version (Silk.NET reports 3.3 core, Avalonia 4.0),
+and the `Viewport:` line each host prints when the framebuffer size changes or is first measured. Everything
+else matches word for word, and a missing file only produces a `warn:` line that skips that entry — a run
+never fails because of test data, so a half-added model is visible instead of fatal.
 
 Smoke mode proves that the GL context comes up, the shaders compile, meshes upload and N consecutive frames
-run without error. It does **not** assert what the picture looks like (that would need screenshot
+run without error, **plus** one pick self-check at the real framebuffer size of the machine (see "The
+coordinate chain" below). It does **not** assert what the picture looks like (that would need screenshot
 comparison), which is why the minimal hosts animate nothing: the frame count comes from `IRenderer.Stats`
 and does not depend on anything moving in the scene.
 
 Clicking prints the picked link's name, which is direct evidence that the interaction path (screen pixel →
-world ray → triangle intersection → highlight) works:
+world ray → triangle intersection → highlight plus the link's own axes, all read-only) works:
 
 ```
 Pick: selected 'shoulder_link:visual0'
 Pick: nothing selected
 ```
+
+### The coordinate chain: cursor → pixel → ray
+
+A click is only as good as the answer to one question: *which pixel of the picture is under the cursor?* The
+picture is drawn into a **framebuffer whose size the compositor chooses**, and that size is not always the
+one a host would predict from its own layout. Measured on this repository's Avalonia host (Avalonia 12, X11,
+with `RenderScaling` reporting `1.00`):
+
+```
+Viewport: 1157x755 px from framebuffer | control layout 1100x718 at scaling 1.00 = 1100x718 px
+```
+
+The control is 1100×718 layout units while the surface it draws into is **1157×755 px** — 5.2% larger — and
+the compositor scales that whole surface onto the control. A host that predicts the viewport as
+`Bounds × RenderScaling` (1100×718) therefore draws into a rectangle smaller than the surface *and* casts the
+ray against it: the click then sits ~5% away from the cursor — 148 mm at the edge of the test scene, more
+than twice the diameter of a link — and the error grows with the window. Both hosts therefore:
+
+* take the viewport from the framebuffer GL is actually rendering into (Avalonia: the colour attachment of
+  the bound framebuffer; Silk: `IView.FramebufferSize`), falling back to the layout/window size only when the
+  query yields nothing, and log it once per change (`Viewport: …`);
+* convert the pointer with the **measured ratio** of that surface to the layout/window size (1.0518 px per
+  layout unit in the example), never with the display scale alone.
+
+The pointer position itself needs no manual conversion in Avalonia: `PointerEventArgs.GetPosition(this)` is
+already in the control's own space, so a control that does not start at the window origin — or sits inside a
+container — is handled for you; subtracting an offset by hand is exactly the bug. Pressing the button logs
+the whole chain for that one click:
+
+```
+Pointer: control=548.0,413.0 window=548.0,413.0 control-origin=0.0,0.0 bounds=1100x718 scale=1.0521,1.0521 px/unit viewport=1157x755 (framebuffer) pixel=576.5,434.5
+```
+
+`control` and `window` must differ by exactly `control-origin`, and `pixel` is where the ray will be cast
+inside the viewport. Numbers that do not add up here mean the host is picking in a different space from the
+one it draws in — which is what the smoke run's self-check catches:
+
+```
+Pick check: 15/21 surface samples select their own link, 6 are covered by a nearer link, 0 are missed entirely,
+worst round-trip error 0.00px, viewport 1157x755 px (framebuffer), scale 1.0521,1.0521 px/unit
+(the layout prediction is 1100x718 px, 1.0518× off)
+```
+
+It runs ten frames into a `--smoke` run. Each sample is a point on a link's visible surface; it is projected
+to the pixel the picture shows it on, converted back into control/window coordinates through the very
+conversion a click uses, and picked. Samples that a nearer link legitimately covers are counted, not required
+to hit their own link (the check is not a visibility test); what may never happen is a ray that misses a
+surface the picture shows, or a hit that comes back on a different pixel than the one asked about. A failed
+self-check fails the run (exit code 1).
 
 ## 4. Swapping in another model
 

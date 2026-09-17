@@ -1,12 +1,12 @@
 # 测试数据指南
 
-`src/BareWindowTest` 与 `src/AvaloniaTest` 是本仓库的端到端检查，同时也是**最小的嵌入示例**：两者各自把**一个 URDF 机器人**装进一个默认场景、渲染出来，并打印一份两个宿主共用的日志。窗口里只有三件事——轨道相机（左键拖拽旋转 / 中键平移 / 右键或滚轮缩放）、点击选中高亮、以及库自带的地面网格与世界坐标轴。本文只讲这**一个文件**：它放在哪、从哪来、怎么换。
+`src/BareWindowTest` 与 `src/AvaloniaTest` 是本仓库的端到端检查，同时也是**最小的嵌入示例**：两者各自把**一个 URDF 机器人**装进一个默认场景、渲染出来，并打印一份两个宿主共用的日志。窗口里只有三件事——轨道相机（左键拖拽旋转 / 中键平移 / 右键或滚轮缩放）、点击选中（高亮 + 挂上该部件的自身坐标系，纯显示不可拖动）、以及库自带的地面网格，右下角还有渲染器绘制的屏幕空间朝向 gizmo（世界坐标轴默认关闭，需要时手动开）。**点击与拖拽以 6 像素为界**：指针在阈值内按下再松开算一次点击，越界才算拖拽。点击**不会移动相机**——宿主先把相机恢复为按下时的姿态快照，再按用户当时看到的那一帧发射拾取射线；否则几像素的手抖就会让「点在这一帧的部件上」变成「射线早已偏到部件之外」。本文只讲这**一个文件**：它放在哪、从哪来、怎么换。
 
 ## 1. 数据放在哪里
 
 ```
-src/BareWindowTest/Assets/        # 会被拷到 …/BareWindowTest/bin/<cfg>/net10.0/ 旁
-src/AvaloniaTest/Assets/          # 会被拷到 …/AvaloniaTest/bin/<cfg>/net10.0/ 旁
+src/BareWindowTest/Assets/        # 会被拷到 …/BareWindowTest/bin/<cfg>/net8.0/ 旁
+src/AvaloniaTest/Assets/          # 会被拷到 …/AvaloniaTest/bin/<cfg>/net8.0/ 旁
 ├─ Models/
 │  ├─ fairino3_v6/                # ★ 宿主加载的就是这一个：*.urdf + meshes/*.STL
 │  ├─ primitives.urdf             # 备用样例：URDF 内置几何（见 §5）
@@ -31,7 +31,7 @@ src/AvaloniaTest/Assets/          # 会被拷到 …/AvaloniaTest/bin/<cfg>/net1
 
 **一个 URDF 就够把整条链路走通**——XML 解析、`package://` 资源解析、STL 导入、link/joint 树、材质与光照——所以宿主只装它一个，代码因此小到可以当范例读。
 
-相机也**不被覆盖**：`SceneGraph` 的构造函数已经摆好了网格地板、灯光、世界坐标轴和一个可用的相机位姿，宿主直接沿用。这本就是本库对嵌入方的承诺——`new SceneGraph()` 之后就是一个能看的场景，不需要任何调参。
+相机也**不被覆盖**：`SceneGraph` 的构造函数已经摆好了网格地板、灯光和一个可用的相机位姿（世界坐标轴默认关闭），宿主直接沿用；朝向反馈同样无需配置——渲染器会在宿主设定的视口右下角画屏幕空间 gizmo；选择反馈也一样：点击直接交给 `SceneGraph.PickAndSelect`，高亮与该部件自己的坐标轴一次到位——那是用来读的标记，不是用来拖的手柄。这本就是本库对嵌入方的承诺——`new SceneGraph()` 之后就是一个能看的场景，不需要任何调参。
 
 `Assets/` 里其余样例数据仍然保留（见 §5），只是**最小示例不加载它们**。
 
@@ -51,22 +51,51 @@ dotnet run --project src/AvaloniaTest
 ```
 Smoke mode: rendering 120 frame(s), then exiting.
 GPU: Quadro P520/PCIe/SSE2 | vendor: NVIDIA Corporation | GL: 3.3.0 … | GLSL: 3.30 …
-Test data: …/bin/Debug/net10.0/Assets
+Test data: …/bin/Debug/net8.0/Assets
 Loading model: …/Assets/Models/fairino3_v6/fairino3_v6.urdf
 FPS 43.0 | last 19.21 ms | avg 23.24 ms | frames 29
 Smoke OK: rendered 120 frame(s) with no error.
 ```
 
-两份日志**唯一**允许的差异是 GL / GLSL 版本（Silk.NET 报 3.3 core，Avalonia 报 4.0）。文件缺失只会产生一行 `warn:` 并跳过该条目——运行永远不会因为测试数据失败，所以「只加了一半」的模型是可见的，而不是致命的。
+按构造而言有**两类**行必然不同，它们描述的正是宿主必须自己决定的那件事——如何取得 GL、如何确定视口大小：GL / GLSL 版本（Silk.NET 报 3.3 core，Avalonia 报 4.0），以及每个宿主在 framebuffer 尺寸变化或首次测量时打印的那行 `Viewport:`。其余各行逐字相同；文件缺失只会产生一行 `warn:` 并跳过该条目——运行永远不会因为测试数据失败，所以「只加了一半」的模型是可见的，而不是致命的。
 
-冒烟模式证明的是：GL 上下文能建起来、着色器能编译、mesh 能上传、连续 N 帧无错误。它**不**断言画面内容（那需要截图比对），所以最小宿主里没有动画——帧计数来自 `IRenderer.Stats`，不依赖场景里有什么在动。
+冒烟模式证明的是：GL 上下文能建起来、着色器能编译、mesh 能上传、连续 N 帧无错误，**并且**会在真机的实际 framebuffer 尺寸下跑一次拾取自检（见下方「坐标链」）。它**不**断言画面内容（那需要截图比对），所以最小宿主里没有动画——帧计数来自 `IRenderer.Stats`，不依赖场景里有什么在动。
 
-点击选中会打印命中的 link 名，这是交互链路（屏幕像素 → 世界射线 → 三角形求交 → 高亮）可用的直接证据：
+点击选中会打印命中的 link 名，这是交互链路（屏幕像素 → 世界射线 → 三角形求交 → 高亮 + 该部件自身坐标轴，均为只读）可用的直接证据：
 
 ```
 Pick: selected 'shoulder_link:visual0'
 Pick: nothing selected
 ```
+
+### 坐标链：光标 → 像素 → 射线
+
+一次点击可信与否，只取决于一个问题的答案：**光标下面是画面里的哪个像素？** 画面被画进**由合成器决定大小的 framebuffer**，而这个尺寸并不总是宿主按自身布局能推算出来的那个。在本仓库 Avalonia 宿主上实测（Avalonia 12、X11，`RenderScaling` 报 `1.00`）：
+
+```
+Viewport: 1157x755 px from framebuffer | control layout 1100x718 at scaling 1.00 = 1100x718 px
+```
+
+控件布局是 1100×718 逻辑单位，而它绘制的表面是 **1157×755 像素**——大 5.2%——合成器会把整张表面铺到控件上。因此按 `Bounds × RenderScaling`（1100×718）推算视口的宿主，既把画面画进比表面更小的矩形，又按那个矩形发射拾取射线：点击位置与光标相差约 5%，在测试场景边缘相当于 **148 毫米**——超过一条 link 直径的两倍——而且**窗口越大误差越大**。因此两个宿主都：
+
+* 从 **GL 实际渲染的 framebuffer** 取视口尺寸（Avalonia 读已绑定 framebuffer 的颜色附着，Silk 读 `IView.FramebufferSize`），只有查询不到时才退回布局／窗口尺寸，并在尺寸变化时打印一行 `Viewport:`；
+* 用**实测比例**（上例为 1.0518 像素 / 逻辑单位）把指针坐标换算为像素，而不是只用显示缩放。
+
+Avalonia 里指针坐标本身**不需要手工换算**：`PointerEventArgs.GetPosition(this)` 已经是控件自身坐标系，因此控件不在窗口原点、或嵌在容器里都自动正确；手工去减偏移才是那个 bug。按下鼠标时会为该次点击打印整条坐标链：
+
+```
+Pointer: control=548.0,413.0 window=548.0,413.0 control-origin=0.0,0.0 bounds=1100x718 scale=1.0521,1.0521 px/unit viewport=1157x755 (framebuffer) pixel=576.5,434.5
+```
+
+其中 `control` 与 `window` 之差必须正好等于 `control-origin`，`pixel` 就是射线将在视口内发射的像素位置。这几个数对不上，就说明该宿主「拾取用的坐标系」与「绘制用的坐标系」不是同一个——这正是冒烟自检要抓的：
+
+```
+Pick check: 15/21 surface samples select their own link, 6 are covered by a nearer link, 0 are missed entirely,
+worst round-trip error 0.00px, viewport 1157x755 px (framebuffer), scale 1.0521,1.0521 px/unit
+(the layout prediction is 1100x718 px, 1.0518× off)
+```
+
+它在 `--smoke` 运行到第 10 帧时执行。每个采样点都是某个 link 可见表面上的点：先投影到画面显示它的那个像素，再按**点击所用的同一套换算**反算回控件／窗口坐标，然后拾取。被更近 link 合法遮挡的采样点只计数、不要求命中自身（自检不是可见性测试）；但射线不能漏掉画面显示有表面的地方，也不能在问某个像素时命中别的像素——自检不通过，整次运行即失败（退出码 1）。
 
 ## 4. 换一个模型
 

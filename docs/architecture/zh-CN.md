@@ -123,7 +123,7 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-009 | 基础图元以 GameObject 派生类暴露（`Box`/`Sphere`/`Cylinder`/`Capsule`/`GroundPlane`/`Arrow`/`Axes`） | `new Box(...)` 直接 `scene.Add` |
 | ADR-010 | 输入事件只在宿主层翻译为相机命令；`Core` 不感知具体输入框架 | 相机手势策略归宿主 |
 | ADR-011 | 宿主经 `OpenGL/Device/GraphicsFactory` 组装后端（接口化组合根） | 宿主只持有 `IRenderContext` / `IRenderer` |
-| ADR-012 | 坐标轴恒定屏幕尺寸由 `Axes` 自身管理，Renderer 只读取 | 着色器做各向同性补偿 |
+| ADR-012 | 坐标轴尺寸策略由 `Axes` 自身管理、Renderer 只读取：恒定屏幕尺寸，或固定世界长度 | 着色器做各向同性补偿；固定长度以 ratio=0、min=max=length 表达 |
 | ADR-013 | 相机是「显示状态对象」，暴露数学状态与 `Rotate`/`Pan`/`Zoom`/`Reset`，另有 `ScreenToWorldRay` | 拾取入口 |
 | ADR-014 | 点云采用 ROS `sensor_msgs/PointCloud2` 风格字段布局 | `PointCloud2Data` |
 | ADR-015 | 机器人子树在构建后被 `Transform` 只读锁定，只能经 `RobotModel` 内置接口改位姿 | 禁止外部直接改写关节/子 link 位姿 |
@@ -134,6 +134,8 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-020 | 文件夹与命名空间刻意解耦：文件夹可细于命名空间，重排文件夹**不改** `namespace`（由 `.editorconfig` 关闭 IDE0130 固定） | 保住对外 API 契约；文件夹只是仓库内部组织方式 |
 | ADR-021 | URDF 资产查找改为「根回退链」：显式 `assetDirectory`（优先）→ URDF 同级目录（默认）；`package://` 的**包名一律丢弃** | 用显式资源根取代启发式猜测（`assetDirectory` ＝ MuJoCo `meshdir`）；标准 ROS 的 `urdf/`+`meshes/` 布局无需改 URDF 即可加载 |
 | ADR-022 | 点云增量更新：数据层「可增长缓冲 + 环形起点 + 修订号/变更窗口」，后端拉取式局部上传（`PointMesh.Sync`），并按帧戳回收 GPU 资源缓存 | 追加不搬数据、驱逐只移动环形起点 → 每帧只上传新增的几个点；`Revision` 未变则一个字节也不传 |
+| ADR-023 | 朝向反馈按性质一分为二：场景里的坐标轴是普通、会被遮挡的「尺子」（`AxesSizing.FixedWorldLength`，`FitWorldAxesToContent` 让它伸出模型之外）；屏幕空间 gizmo 由渲染器画在视口右下角（独占视口 + 限定在 `glScissor` 内的深度清理，永不被遮挡、永不参与拾取）。默认场景不开世界坐标轴、开 gizmo | 「X/Y/Z 朝哪」是 UI 问题，「一米有多长」是场景问题——各自在自己的空间里回答，互不干扰 |
+| ADR-024 | 选择反馈成对出现、由场景装配：`SceneGraph.Select` 既高亮被点中的对象，又在它身上挂该节点自己的局部坐标轴（不可拾取；`ShowSelectionAxes` 默认开）；渲染器的角落 gizmo 则保持「裸标」——三支箭头 + 一个原点小球，不带背景底盘。两者都**只用于显示**：库内不提供任何拖拽手柄，场景也从不回写位姿 | 高亮只说明「选中了什么」，说不出这个节点的坐标系朝哪；世界原点的坐标轴又与被选中的对象无关——两者本属同一次点击。而机器人各 link 的位姿归关节链所有，只「显示」参考系的反馈永远不会与运动学打架 |
 
 ---
 

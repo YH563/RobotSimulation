@@ -30,7 +30,7 @@ The repo is organized by the boundaries of *future publishable NuGet packages* �
 - **Model import**: `AssimpModelLoader` (STL / OBJ / DAE / glTF), point clouds `PointCloudIo` (PCD / PLY).
 - **Robotics**: `RobotModel` (URDF → robot `GameObject` tree, itself a `GameObject`), `RobotState` (headless FK), pure-data descriptions, extensible `IAssetResolver`.
 - **Custom shaders**: the OpenGL backend ships a built-in GLSL pipeline (Model / Line / Point / Skybox / Axes) as embedded resources, and the architecture is deliberately shaped so shading can become a first-class, game-engine-like extension point (see `docs/opengl/en.md`; per-node custom-shader injection is a planned next step).
-- **Picking**: `Camera.ScreenToWorldRay` → `SceneGraph.Pick` / `PickAndHighlight` (with highlight feedback).
+- **Picking & selection feedback**: `Camera.ScreenToWorldRay` → `SceneGraph.Pick` / `PickAndSelect` (a pick highlights the object *and* mounts that object's own local axes as a read-only marker; `PickAndHighlight` flips the highlight alone) — plus the renderer's backdrop-free screen-space orientation gizmo. No drag handles exist anywhere in the library, so feedback can never edit a model's poses.
 - **Cross-UI embedding**: `Core` / `Robot` touch no graphics or window API at all, and `OpenGL` mentions Silk.NET only where the host's own GL handle must cross the boundary (`GraphicsFactory.Create` / `CreateContext` and the resource types uploaded through it) — the backend and the host stay replaceable.
 
 ## 3. Install
@@ -46,7 +46,7 @@ dotnet add package RobotSimulation.Robot
 dotnet add package RobotSimulation.OpenGL
 ```
 
-> Version numbers and `PackageId` are set at first release; the repo currently targets `net10.0`.
+> Version numbers and `PackageId` are set at first release; the repo currently targets `net8.0`.
 
 ## 4. Quick Start
 
@@ -73,7 +73,7 @@ using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Robot;
 
-var scene = new SceneGraph();                       // default camera / lights / grid / axes
+var scene = new SceneGraph();                       // default camera / lights / grid (world axes are opt-in)
 
 // A simple box primitive
 scene.Add(new Box(1f, 0.5f, 0.2f, name: "base"));
@@ -146,7 +146,8 @@ dotnet run --project src/AvaloniaTest  -- --smoke 120
 dotnet run --project src/AvaloniaTest
 ```
 
-One run loads exactly one URDF (`fairino3_v6`); the grid floor, lights, world axes and camera pose all come from the library's default `SceneGraph`, and the window then offers orbit (drag), zoom (wheel / right-drag) and pick-to-highlight (click). The repository also ships further ready-to-use samples in `Assets/` — URDF built-in geometry, the community `urdf_tutorial` package, all five mesh formats, and two RGB point clouds — plus the scripts that regenerate them; swap one in by changing a single constant. See [`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md) for where the data comes from and how to add or download more.
+One run loads exactly one URDF (`fairino3_v6`); the grid floor, lights and camera pose all come from the library's default `SceneGraph`, its renderer adds the screen-space orientation gizmo in the bottom-right corner, and a click selects through `SceneGraph.PickAndSelect` — the picked object is highlighted and carries its own local axes, display only: no drag handles exist anywhere in the library, so feedback can never edit a robot's joint-driven poses (the world-origin axes are opt-in).
+The repository also ships further ready-to-use samples in `Assets/` — URDF built-in geometry, the community `urdf_tutorial` package, all five mesh formats, and two RGB point clouds — plus the scripts that regenerate them; swap one in by changing a single constant. See [`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md) for where the data comes from and how to add or download more.
 
 ## 5. Documentation
 
@@ -173,7 +174,7 @@ Fully split into Chinese / English, per module **and** for this index itself —
 - [x] Packaging metadata (`PackageId` / version / NuGet metadata / README / license): `Directory.Build.props` plus each `.csproj`, verified with `dotnet pack` — 3 `.nupkg` + 3 `.snupkg`, each carrying its XML docs, the README and a `LICENSE` copy. Pushing to a feed stays a separate, manual step.
 - [ ] `Visualization` display layer (rviz-like Display) and external write protocol (Sink).
 - [ ] Three host samples / test projects: bare window, WPF, Avalonia — one `RobotViewport`-style control each, proving the library *can render standalone* and providing a place to host tests. **In progress**: bare window (`src/BareWindowTest`) ✔ and Avalonia (`src/AvaloniaTest`) ✔; WPF pending.
-- [ ] Unit tests: geometry primitives, ray picking, URDF parsing, `RobotState` FK. **In progress**: `src/RobotSimulation.Tests` (xunit, 14 checks) covers URDF parsing and `IAssetResolver` path resolution end to end — including the standard ROS layout that only loads with `assetDirectory` ✔; geometry primitives, ray picking and `RobotState` FK pending.
+- [ ] Unit tests: geometry primitives, ray picking, URDF parsing, `RobotState` FK. **In progress**: `src/RobotSimulation.Tests` (xunit, **37 checks** over four files) covers URDF parsing and `IAssetResolver` path resolution end to end — including the standard ROS layout that only loads with `assetDirectory` ✔ — geometry primitives and ray picking (surface-point round trip, how click drift grows with the window, the compositor-vs-layout viewport mismatch) ✔, and the default `SceneGraph` with its selection contract ✔; `RobotState` FK pending.
 - [ ] (optional) An additional non-Silk render backend.
 
 ---

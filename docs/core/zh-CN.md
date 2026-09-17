@@ -88,7 +88,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 - `Vector3 WorldToLocal(Vector3 worldPoint)` / `Vector3 LocalToWorld(Vector3 localPoint)`
 
 ### `SceneGraph`
-场景根容器：持有对象树、活动相机、灯光集合与场景显示默认值（背景/环境光/网格地面）。构造函数自动装配默认相机姿态、默认灯光、网格地面与世界坐标轴。
+场景根容器：持有对象树、活动相机、灯光集合与场景显示默认值（背景/环境光/网格地面）。构造函数自动装配默认相机姿态、默认灯光与网格地面；世界坐标轴只在 `ShowWorldAxes` 打开时创建（默认关闭——「X/Y/Z 朝哪」由渲染器绘制的屏幕空间朝向 gizmo 承担，不必往场景里放一套会被模型遮挡、还会随缩放变形的坐标轴）。选择则是把同一个问题问到**某一个节点**上：`Select` 高亮选中的对象、并在它身上挂一套它自己的局部坐标轴——「选中了什么」与「它朝哪」一次一起给出。这套坐标轴是**纯显示**的：它只是一个普通子节点，没有任何拖拽手柄，场景也从不回写节点位姿——所以「看参考系」永远碰不到由关节链决定的姿态。
 
 | 成员 | 类型 | 说明 |
 |---|---|---|
@@ -96,27 +96,36 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 | `Camera` | `Camera` | 活动相机（可整体替换） |
 | `BackgroundColor` | `Vector4` | 清屏/背景色，默认中灰 |
 | `AmbientColor` | `Vector3` | 环境光（RGB 强度 0-1），默认较暗 |
-| `ShowGrid` / `ShowWorldAxes` | `bool` | 是否显示默认网格/世界坐标轴 |
-| `WorldAxesLength` | `float` | 世界坐标轴长度（默认 1.0） |
+| `ShowGrid` | `bool` | 是否显示默认网格地面（默认 true） |
+| `ShowWorldAxes` | `bool` | 是否显示默认世界原点坐标轴（默认 **false**：需要世界尺度参照时再打开） |
+| `WorldAxesLength` | `float` | 世界坐标轴长度（米，默认 0.5）。默认坐标系是 `AxesSizing.FixedWorldLength`，所以这是真实长度而非屏幕尺寸 |
+| `ShowOrientationGizmo` | `bool` | 是否绘制屏幕空间朝向 gizmo（默认 true） |
+| `OrientationGizmoSize` / `OrientationGizmoMargin` | `float` | gizmo 方块边长 / 到右下边缘的间距（像素，默认 160 / 16）。该控件只有三支箭头与一个中心小球，不带背景底盘 |
+| `ShowSelectionAxes` | `bool` | 是否在选中对象上显示它自己的局部坐标轴（默认 true；纯显示——是标记，不是拖拽手柄） |
+| `SelectionAxesLength` | `float` | 选中对象所挂坐标轴的参考长度（米，默认 0.3） |
+| `Selected` | `GameObject?` | 当前选中的对象（只读；请经 `Select` / `PickAndSelect` 改变选择） |
+| `GridCellSize` / `GridCellCount` / `GridColor` | `float` / `int` / `Vector4` | 网格地板参数：格边长（米）/ 单侧格数 / 线色 |
+| `Lights` | `IReadOnlyList<Light>` | 场景灯光（`Add` 自动收集） |
 
 方法 / Methods:
-- `void Add(GameObject go)` / `bool Remove(GameObject go)` / `void Clear()`
-- `GameObject Find(string name)` —— 按名查找（深度优先）
-- `IReadOnlyList<GameObject> FindAll(string name)` —— 按名查找全部
-- `IEnumerable<GameObject> EnumerateAll()` —— 全树枚举
-- `Update(double deltaTime)` —— 递归调用各节点 `Update` + 相机/模型更新（更新线程）
-- 拾取：`bool Pick(Ray ray, out RaycastHit hit, Func<GameObject,bool>? predicate = null)`、`bool PickAndHighlight(Ray ray, Color? color = null, ...)`、`ClearHighlight()`
-- `SetWorldAxes(bool visible, float length)` / `ShowGrid(bool visible)`
+- `void Add(GameObject? obj)` —— 加入场景（根节点自动登记；`Light` 同时进 `Lights`）
+- `void Remove(GameObject? obj)` —— 移出场景（`Light` 同时出 `Lights`）
+- `Update(double deltaTime)` —— 递归调用各节点 `Update`（更新线程）
+- 默认装配：`Grid? AddDefaultGrid()`、`void AddDefaultLights()`、`Axes? AddDefaultWorldAxes()`、`void ApplyDefaultCamera()`（构造函数已按 `ShowGrid` / `ShowWorldAxes` 调用前三个）
+- `float FitWorldAxesToContent(float factor = 1.15f)` —— 按场景内容世界包围盒的最大边长 × `factor` 重设坐标轴长度（测量时忽略坐标系自身、网格与灯光），让轴「伸出模型之外」而不是藏在模型里；会同步已经创建的那一套并返回所用长度，按 `WorldAxesName` 查找节点
+- 拾取：`RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`、`GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`
+- 选择：`GameObject? Select(GameObject? obj, bool highlight = true)` —— 带反馈的单选：新对象拿到高亮，并在 `ShowSelectionAxes` 打开时挂上它自己的局部坐标轴（不可拾取，所以不会吞掉下一次点击）；旧对象两者一起失去，传 null 即清空。只有 `Select` 自己挂上的坐标轴才会被它卸下。该标记只**显示**参考系、从不修改它——库内任何地方都没有拖拽手柄，所以一次点击碰不到机器人由关节链决定的姿态
+- `GameObject? PickAndSelect(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` —— `Pick` + `Select` 一次完成，即宿主点击链路的全部
+- `void Dispose()` —— 清空节点与灯光引用（GPU 资源由渲染器释放）
 
 ### `Camera`
 「显示状态对象」，不持有场景，仅数学状态。可通过 `SceneGraph.Camera` 整体替换。
 
-属性：`Position`, `Target`, `Up`, `NearPlane`, `FarPlane`, `Fov`, `Orthographic`, `OrbitDistance`, `ClipFarAllowed` 等。
+属性：`Yaw`, `Pitch`（度，`Pitch` 钳制 [-89, 89] 防翻转）, `Distance`（钳制 [0.5, 200]）, `Target`（轨道中心）, `Position`（只读，由轨道状态导出，并作为 `ScreenToWorldRay` 的射线起点）, `Fov`, `AspectRatio`（宿主在每帧/resize 时写入）, `NearPlane`, `FarPlane`。
 方法：
-- `Vector3 Forward` / `Vector3 Right` / `Vector3 Up` / `Vector3 Eye`（unit 向量）
-- `Matrix4x4 GetViewMatrix()` / `Matrix4x4 GetProjectionMatrix(float aspect)` / `GetViewProjection(aspect)`
-- 手势：`Rotate(float pitchDelta, float yawDelta, float distanceDelta = 0)`、`Pan(Vector2 delta)`、`Zoom(...)`、`Reset()`
-- `Ray ScreenToWorldRay(Vector2 ndc)` —— 拾取入口；`Vector3 ScreenToWorld(Vector3 ndc)`
+- `Matrix4x4 GetViewMatrix()` / `Matrix4x4 GetProjectionMatrix()` —— 投影用 `AspectRatio` 属性（没有 aspect 参数版本）
+- 手势：`Rotate(float deltaYawDeg, float deltaPitchDeg)`（**先 yaw 后 pitch**）、`Pan(Vector2 screenDelta)`（屏幕像素位移，X 右为正 / Y 上为正）、`Zoom(float delta)`（正数靠近）、`Reset()`
+- `Ray ScreenToWorldRay(Vector2 screenPositionPixels, Vector2 viewportSizePixels)` —— 拾取入口：屏幕像素（左上原点、X 右、Y 下）→ 世界射线。**两个参数都是像素**，且视口尺寸必须与渲染用的那块视口一致（像素→NDC 由二者比值决定），否则射线会偏
 
 ### `Light`
 `enum LightType { Directional, Point }`。成员：`Type`, `Color`（`Vector3` 强度）、`Direction` / `Position`、`Intensity`、`Range`。暴露 `WorldPosition` / `WorldDirection`（渲染用）。
@@ -125,25 +134,26 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 均为 `GameObject` 派生，构造即生成 CPU 网格与材质，可直接 `scene.Add`：
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)`（轴沿 +Z）/ `Capsule(radius, height, name?)`（轴沿 +Z，总高 = height + 2×radius）
 - `GroundPlane(size, name?)` / `Arrow(...)`（方向箭头）/ `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
+  - `Axes` 有两种尺寸策略（`AxesSizing`）：`ConstantScreenSize`（默认，屏幕尺寸由 `ScreenScale`/`MinWorldLength`/`MaxWorldLength` 固定，适合做「节点标记」）与 `FixedWorldLength`（箭头长度恒为 `Length` 个世界单位，适合做「尺子」）。两种模式下 `Length` 都可写：坐标轴着色器按箭头自身长度做归一化，改长度不需要重建几何。
 
 ---
 
 ## 2. Geometry / 几何与数据 (`Geometry/`)
 
 ### 射线与边界
-- `RaycastHit`：`Hit`(bool)、`Distance`、`Point`、`Normal`、`GameObject`。
-- `Ray` 属于 `Camera`/`ScreenToWorldRay` 的输出；`SceneGraph.Pick*` 接收 `Ray`。
+- `Ray`：`Origin` + 单位 `Direction`（构造时自动归一化，零向量抛 `ArgumentException`），因此 `t` 就是世界单位距离、可跨对象比较。
+- `RaycastHit`：`Object`(`GameObject`)、`Point`（世界命中点）、`Distance`（沿射线，世界单位）、`Normal`（世界法线，朝向射线）、`U` / `V`（命中三角形的重心坐标）。
+- `Camera.ScreenToWorldRay` 产出 `Ray`，`SceneGraph.Pick*` 消费 `Ray`。
 
-### `Raycast`（静态）
-- `bool HitBounds(Bounds bounds, Ray ray, out float distance)`
-- `bool HitMesh(MeshData mesh, Ray ray, out float distance, out Vector3 normal, out float u, out float v)` —— 已变换后的网格
-- `bool HitSphere(Vector3 center, float radius, Ray ray, out float distance, out Vector3 normal)` —— 保留为通用工具
-- `bool HitPlane(Vector3 point, Vector3 normal, Ray ray, out float distance)` —— 保留为通用工具
-- `bool IntersectTriangle(Ray ray, Vector3 a, Vector3 b, Vector3 c, out float distance, out Vector3 normal, out float u, out float v)` —— Möller-Trumbore，双面命中
+### `Raycast`（静态；可空返回值表示未命中）
+- `float? HitSphere(in Ray ray, Vector3 center, float radius)`
+- `float? HitPlane(in Ray ray, Vector3 point, Vector3 normal)` —— 平行或位于射线背后返回 null
+- `float? HitAABB(in Ray ray, in Bounds bounds)` —— slab 法宽相；起点在盒内返回负距离（仍算命中）
+- `bool HitTriangle(in Ray ray, Vector3 a, Vector3 b, Vector3 c, out float distance, out Vector3 normal, out float u, out float v)` —— Möller–Trumbore，双面命中（背面命中时法线翻向射线）
 
 ### `Bounds`
-- `Bounds(Vector3 min, Vector3 max)`、`CreateFromPoints(IEnumerable<Vector3>)`、`static Bounds FromPoints(...)`。
-- `Min` / `Max` / `Center` / `Extents` / `Radius`，`Contains(Vector3)`，`Encapsulate(Vector3)` / `Encapsulate(Bounds)`，`IsEmpty`。
+- 构造 `Bounds(Vector3 min, Vector3 max)`（不校验，调用方保证 `min <= max`）、`static Bounds FromPoints(IEnumerable<Vector3>)`（空集合得到 `Min = Max = 0` 的空盒）。
+- 属性 `Min` / `Max` / `Center` / `Size`。
 
 ### 点云 `PointCloud2Data` / `PointField` / `PointFieldDataType`
 ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述。每个点占 `PointStep` 字节，各通道（x/y/z/rgb/intensity）由 `PointField`（offset + datatype + count）定位。位置通道（x/y/z）必需；颜色可选，按 rgb/rgba → 单独 r/g/b → intensity（灰度）的优先级解析。

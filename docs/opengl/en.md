@@ -32,6 +32,7 @@ Device layer: holds the `GL` instance, manages viewport, clear, and device capab
 - `event Action<int,int>? Resized`, `Resize(int width, int height)`, `Clear(Vector4 clearColor, bool clearDepth = true)`.
 - `GraphicsDeviceInfo DeviceInfo`: device/driver strings (`Vendor` / `Renderer` / `ApiVersion` / `ShaderVersion`) read once from `GL.GetString` at construction and exposed as pure strings (no `GLEnum`/`StringName` leaks out).
 - `internal GL NativeGl`: for the assembly's render layer only, not exposed outward; `GL` is allowed only inside this type.
+- `internal (int Width, int Height) ViewportSize`: the last viewport rectangle the host set through `Resize`. Screen-space overlays the renderer draws (the orientation gizmo) anchor themselves to this instead of guessing a window size.
 
 ---
 
@@ -41,6 +42,7 @@ Device layer: holds the `GL` instance, manages viewport, clear, and device capab
 `Render(scene)` walks the scene and instantiates/draws "data → GPU resources". It owns all mesh/material/texture caches and disposal lifecycle.
 
 - Dispatches by `RenderPassKind` (Model/Line/Point/Axes); `Skybox` is a scene-level future background pass, not drawn by ordinary nodes.
+- After the scene is drawn, a scene that keeps `SceneGraph.ShowOrientationGizmo` on gets one more pass: the orientation gizmo — three RGB arrows plus a hub ball, drawn through the axes pass — in the bottom-right corner of the viewport, in a square viewport of its own (the depth clear is confined to that square with `glScissor`, because `glClear` ignores the viewport) and under an orthographic projection built from the scene camera's direction. That keeps it at a constant pixel size, never occluded and never picked, and the widget carries no backdrop, so it annotates the picture instead of covering it. The full viewport is restored afterwards — a host may set its viewport only when its size changes.
 - Light params (`MaxLights = 8`) collected per frame and written into model-shader uniform arrays.
 - `HighlightBlend = 0.30f`: highlight blend factor.
 - `FrameStats Stats`: frame timing (`Fps` / last & smoothed frame ms / `FrameCount`), measured from the interval between `Render` calls with an exponential moving average; updated on the render thread.

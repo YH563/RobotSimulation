@@ -88,7 +88,7 @@ Methods:
 - `Vector3 WorldToLocal(Vector3 worldPoint)` / `Vector3 LocalToWorld(Vector3 localPoint)`
 
 ### `SceneGraph`
-Scene root container: holds the object tree, the active camera, lights, and scene display defaults (background/ambient/grid floor). The constructor auto-assembles the default camera pose, lights, grid floor, and world axes.
+Scene root container: holds the object tree, the active camera, lights, and scene display defaults (background/ambient/grid floor). The constructor auto-assembles the default camera pose, lights and grid floor; the world-origin axes are created only when `ShowWorldAxes` is on (off by default — the renderer's screen-space orientation gizmo answers "which way is X/Y/Z" without putting an occludable axes set in the scene). Selection is the same question asked about one node instead of the world: `Select` highlights what was picked and mounts that node's own local axes on it, so "what did I pick" and "which way does it point" arrive together. Those axes are **display only** — a plain child node with no drag affordance, and the scene never writes back to a node's transform, so reading a frame can never disturb a model whose poses belong to its joint chain.
 
 | Member | Type | Notes |
 |---|---|---|
@@ -96,27 +96,36 @@ Scene root container: holds the object tree, the active camera, lights, and scen
 | `Camera` | `Camera` | Active camera (replaceable as a whole) |
 | `BackgroundColor` | `Vector4` | Clear/background color, default mid-grey |
 | `AmbientColor` | `Vector3` | Ambient light (RGB intensity 0-1), default dark |
-| `ShowGrid` / `ShowWorldAxes` | `bool` | Show default grid / world axes |
-| `WorldAxesLength` | `float` | World axes length (default 1.0) |
+| `ShowGrid` | `bool` | Show the default grid floor (default true) |
+| `ShowWorldAxes` | `bool` | Show the default world-origin axes (default **false**: opt in when a world-scale ruler is wanted) |
+| `WorldAxesLength` | `float` | World axes length in meters (default 0.5). A real length, because the default set is `AxesSizing.FixedWorldLength` |
+| `ShowOrientationGizmo` | `bool` | Draw the screen-space orientation gizmo (default true) |
+| `OrientationGizmoSize` / `OrientationGizmoMargin` | `float` | Gizmo square size / gap to the bottom-right edges, in pixels (defaults 160 / 16). The widget is just three arrows and a hub ball — it carries no backdrop |
+| `ShowSelectionAxes` | `bool` | Show the selected object's own local axes (default true; display only — a marker, never a drag handle) |
+| `SelectionAxesLength` | `float` | Reference length (m) of the axes mounted on the selected object, default 0.3 |
+| `Selected` | `GameObject?` | The currently selected object (read-only; change it through `Select` / `PickAndSelect`) |
+| `GridCellSize` / `GridCellCount` / `GridColor` | `float` / `int` / `Vector4` | Grid floor: cell edge (m) / cells per side / line color |
+| `Lights` | `IReadOnlyList<Light>` | Scene lights (collected by `Add`) |
 
 Methods:
-- `void Add(GameObject go)` / `bool Remove(GameObject go)` / `void Clear()`
-- `GameObject Find(string name)` — find by name (depth-first)
-- `IReadOnlyList<GameObject> FindAll(string name)` — find all by name
-- `IEnumerable<GameObject> EnumerateAll()` — enumerate the whole tree
-- `Update(double deltaTime)` — recurse into each node `Update` + camera/model update (update thread)
-- Picking: `bool Pick(Ray ray, out RaycastHit hit, Func<GameObject,bool>? predicate = null)`, `bool PickAndHighlight(Ray ray, Color? color = null, ...)`, `ClearHighlight()`
-- `SetWorldAxes(bool visible, float length)` / `ShowGrid(bool visible)`
+- `void Add(GameObject? obj)` — add to the scene (root nodes are registered automatically; a `Light` also joins `Lights`)
+- `void Remove(GameObject? obj)` — remove from the scene (a `Light` also leaves `Lights`)
+- `Update(double deltaTime)` — recurse into each node `Update` (update thread)
+- Default assembly: `Grid? AddDefaultGrid()`, `void AddDefaultLights()`, `Axes? AddDefaultWorldAxes()`, `void ApplyDefaultCamera()` (the constructor already calls the first three, honouring `ShowGrid` / `ShowWorldAxes`)
+- `float FitWorldAxesToContent(float factor = 1.15f)` — size the axes to the content's largest world extent × `factor` (the axes, grid and lights are ignored while measuring), so they reach past the model instead of hiding inside it; applies to the set already in the scene and returns the applied length. `WorldAxesName` is the name it looks for
+- Picking: `RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`, `GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`
+- Selection: `GameObject? Select(GameObject? obj, bool highlight = true)` — single selection with feedback: the new object takes the highlight and (with `ShowSelectionAxes`) its own local axes, mounted non-pickable so they never swallow a later click; the previous object loses both, and null clears. Only the axes `Select` mounted itself are unmounted. The marker displays a frame and never edits one — there are no drag handles anywhere in the library, so a pick can't touch a robot's joint-driven poses
+- `GameObject? PickAndSelect(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` — `Pick` + `Select` in one call: a host's whole click path
+- `void Dispose()` — drops the node and light lists (GPU resources are released by the renderer)
 
 ### `Camera`
 A "display-state object" holding only math state; not a scene. Replaceable as a whole via `SceneGraph.Camera`.
 
-Properties: `Position`, `Target`, `Up`, `NearPlane`, `FarPlane`, `Fov`, `Orthographic`, `OrbitDistance`, `ClipFarAllowed`, etc.
+Properties: `Yaw`, `Pitch` (degrees, `Pitch` clamped to [-89, 89] so the view cannot flip), `Distance` (clamped to [0.5, 200]), `Target` (orbit centre), `Position` (read-only, derived from the orbit state and used as the ray origin of `ScreenToWorldRay`), `Fov`, `AspectRatio` (written by the host per frame / on resize), `NearPlane`, `FarPlane`.
 Methods:
-- `Vector3 Forward` / `Vector3 Right` / `Vector3 Up` / `Vector3 Eye` (unit vectors)
-- `Matrix4x4 GetViewMatrix()` / `Matrix4x4 GetProjectionMatrix(float aspect)` / `GetViewProjection(aspect)`
-- Gestures: `Rotate(float pitchDelta, float yawDelta, float distanceDelta = 0)`, `Pan(Vector2 delta)`, `Zoom(...)`, `Reset()`
-- `Ray ScreenToWorldRay(Vector2 ndc)` — picking entry point; `Vector3 ScreenToWorld(Vector3 ndc)`
+- `Matrix4x4 GetViewMatrix()` / `Matrix4x4 GetProjectionMatrix()` — the projection uses the `AspectRatio` property (there is no aspect-taking overload)
+- Gestures: `Rotate(float deltaYawDeg, float deltaPitchDeg)` (**yaw first, then pitch**), `Pan(Vector2 screenDelta)` (screen pixels: +X right, +Y up), `Zoom(float delta)` (positive moves closer), `Reset()`
+- `Ray ScreenToWorldRay(Vector2 screenPositionPixels, Vector2 viewportSizePixels)` — the picking entry point: screen pixels (top-left origin, +X right, +Y down) → world ray. **Both arguments are pixels**, and the viewport must be the one the renderer drew into (pixels → NDC is the ratio of the two), or the ray is tilted off the cursor
 
 ### `Light`
 `enum LightType { Directional, Point }`. Members: `Type`, `Color` (`Vector3` intensity), `Direction` / `Position`, `Intensity`, `Range`. Exposes `WorldPosition` / `WorldDirection` (for rendering).
@@ -125,25 +134,26 @@ Methods:
 All `GameObject` subclasses; the ctor generates CPU mesh + material, ready for `scene.Add`:
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)` (axis +Z) / `Capsule(radius, height, name?)` (axis +Z; total height = height + 2×radius)
 - `GroundPlane(size, name?)` / `Arrow(...)` / `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
+  - `Axes` has two sizing policies (`AxesSizing`): `ConstantScreenSize` (default, a marker whose screen size is fixed by `ScreenScale`/`MinWorldLength`/`MaxWorldLength`) and `FixedWorldLength` (the arrows measure exactly `Length` world units). `Length` stays writable in both, because the axes shader normalises by the arrow's own length.
 
 ---
 
 ## 2. Geometry & Data (`Geometry/`)
 
 ### Ray & bounds
-- `RaycastHit`: `Hit`(bool), `Distance`, `Point`, `Normal`, `GameObject`.
-- `Ray` is the output of `Camera`/`ScreenToWorldRay`; `SceneGraph.Pick*` takes a `Ray`.
+- `Ray`: `Origin` plus a unit `Direction` (normalized by the constructor; a zero vector throws `ArgumentException`), so `t` is a world-unit distance and comparable across objects.
+- `RaycastHit`: `Object` (`GameObject`), `Point` (world hit point), `Distance` (along the ray, world units), `Normal` (world normal, facing the ray), `U` / `V` (barycentric coordinates of the hit triangle).
+- `Camera.ScreenToWorldRay` produces a `Ray`; `SceneGraph.Pick*` consumes one.
 
-### `Raycast` (static)
-- `bool HitBounds(Bounds bounds, Ray ray, out float distance)`
-- `bool HitMesh(MeshData mesh, Ray ray, out float distance, out Vector3 normal, out float u, out float v)` — on a transformed mesh
-- `bool HitSphere(Vector3 center, float radius, Ray ray, out float distance, out Vector3 normal)` — kept as a general utility
-- `bool HitPlane(Vector3 point, Vector3 normal, Ray ray, out float distance)` — kept as a general utility
-- `bool IntersectTriangle(Ray ray, Vector3 a, Vector3 b, Vector3 c, out float distance, out Vector3 normal, out float u, out float v)` — Möller-Trumbore, double-sided
+### `Raycast` (static; a nullable return means a miss)
+- `float? HitSphere(in Ray ray, Vector3 center, float radius)`
+- `float? HitPlane(in Ray ray, Vector3 point, Vector3 normal)` — null when parallel or behind the ray
+- `float? HitAABB(in Ray ray, in Bounds bounds)` — slab broad phase; a negative distance means the origin is inside the box (still a hit)
+- `bool HitTriangle(in Ray ray, Vector3 a, Vector3 b, Vector3 c, out float distance, out Vector3 normal, out float u, out float v)` — Möller–Trumbore, double-sided (the normal flips toward the ray on a back-face hit)
 
 ### `Bounds`
-- `Bounds(Vector3 min, Vector3 max)`, `CreateFromPoints(IEnumerable<Vector3>)`, `static Bounds FromPoints(...)`.
-- `Min` / `Max` / `Center` / `Extents` / `Radius`, `Contains(Vector3)`, `Encapsulate(Vector3)` / `Encapsulate(Bounds)`, `IsEmpty`.
+- Ctor `Bounds(Vector3 min, Vector3 max)` (no validation; the caller guarantees `min <= max`), `static Bounds FromPoints(IEnumerable<Vector3>)` (an empty set yields the empty box `Min = Max = 0`).
+- Properties `Min` / `Max` / `Center` / `Size`.
 
 ### Point cloud `PointCloud2Data` / `PointField` / `PointFieldDataType`
 ROS `sensor_msgs/PointCloud2` style: a flat byte buffer + field descriptions. Each point occupies `PointStep` bytes; channels (x/y/z/rgb/intensity) are located by `PointField` (offset + datatype + count). Position channels (x/y/z) are required; color is optional, resolved by rgb/rgba → per-channel r/g/b → intensity (grey) priority.
