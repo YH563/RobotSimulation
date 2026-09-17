@@ -33,11 +33,78 @@ public class SceneGraph : IDisposable
     /// <summary>Whether to show the default grid floor (<see cref="AddDefaultGrid"/> creates it based on this).</summary>
     public bool ShowGrid { get; set; } = true;
 
-    /// <summary>Whether to show the default world-origin axes (<see cref="AddDefaultWorldAxes"/> creates it based on this).</summary>
-    public bool ShowWorldAxes { get; set; } = true;
+    /// <summary>
+    /// Whether to show the default world-origin axes (<see cref="AddDefaultWorldAxes"/> creates it based on
+    /// this). Off by default: the world origin is not where a robot's interesting frames are, the set is a
+    /// plain scene object that the model occludes, and the screen-space orientation gizmo already answers
+    /// "which way is X/Y/Z" without occupying the scene. Turn it on — and size it with
+    /// <see cref="WorldAxesLength"/> or <see cref="FitWorldAxesToContent"/> so it stands out past the model —
+    /// when a world-scale ruler is what the scene needs.
+    /// </summary>
+    public bool ShowWorldAxes { get; set; } = false;
 
-    /// <summary>Length of the default world-origin axes.</summary>
+    /// <summary>
+    /// World length of the default world-origin axes: used when <see cref="AddDefaultWorldAxes"/> creates them
+    /// and re-applied to the set already in the scene by <see cref="FitWorldAxesToContent"/>. The default axes
+    /// are <see cref="AxesSizing.FixedWorldLength"/>, so this is a length in meters, not a screen size.
+    /// </summary>
     public float WorldAxesLength { get; set; } = 0.5f;
+
+    /// <summary>
+    /// Whether the renderer draws the screen-space orientation gizmo: a small axes set pinned to the
+    /// viewport's bottom-right corner that follows the camera's orientation, like a 3D engine's view widget.
+    /// It is drawn last, into its own small viewport, so it is never occluded by scene geometry, it keeps a
+    /// constant pixel size at any zoom, and — being no scene node — it can never take part in picking.
+    /// </summary>
+    public bool ShowOrientationGizmo { get; set; } = true;
+
+    /// <summary>
+    /// Size (pixels) of the orientation gizmo's square viewport in the bottom-right corner. The renderer's
+    /// orthographic view is 2.2× the arrows' length, so the square is all marker: at 160 px each axis is drawn
+    /// ~72 px long — readable at a glance, with no padding wasted around it.
+    /// </summary>
+    public float OrientationGizmoSize { get; set; } = 160f;
+
+    /// <summary>Gap (pixels) between the orientation gizmo and the viewport's bottom/right edges.</summary>
+    public float OrientationGizmoMargin { get; set; } = 16f;
+
+    /// <summary>
+    /// Whether the selected object shows its own local axes (<see cref="GameObject.ShowLocalAxes"/>): a small marker
+    /// at that node's origin, tilted with its frame. A highlight tells the user *what* was picked; the axes tell them
+    /// which way that node's X/Y/Z point — the same question the corner gizmo answers for the world. On by default,
+    /// so a host that only calls <see cref="Select"/> gets both.
+    /// <para>
+    /// Display only, never a handle: the marker is a plain child node with no drag affordance, and nothing in this
+    /// class writes back to a node's transform. Reference frames can be read with no chance of an accidental edit —
+    /// which is what an articulated model needs, because a link's pose belongs to its joint chain, not to a widget.
+    /// </para>
+    /// </summary>
+    public bool ShowSelectionAxes { get; set; } = true;
+
+    /// <summary>
+    /// Length (meters) of the axes mounted on the selected object. It is read when they are mounted
+    /// (<see cref="Select"/>), so a change applies to the next selection rather than the current one.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not a positive finite number.</exception>
+    public float SelectionAxesLength
+    {
+        get => _selectionAxesLength;
+        set
+        {
+            if (!float.IsFinite(value) || value <= 0f)
+                throw new ArgumentOutOfRangeException(nameof(value), value,
+                    "Selection axes length must be a positive finite value.");
+            _selectionAxesLength = value;
+        }
+    }
+
+    private float _selectionAxesLength = 0.3f;
+
+    /// <summary>
+    /// The currently selected object (null when nothing is selected). Read-only: selection changes go through
+    /// <see cref="Select"/> / <see cref="PickAndSelect"/>, which keep the highlight and the mounted axes in step.
+    /// </summary>
+    public GameObject? Selected { get; private set; }
 
     /// <summary>Cell edge length (meters).</summary>
     public float GridCellSize { get; set; } = 1f;
@@ -53,10 +120,15 @@ public class SceneGraph : IDisposable
 
     private bool _disposed;
 
+    /// <summary>Whether <see cref="Select"/> mounted the current selection's axes, so only those are unmounted again.</summary>
+    private bool _selectionAxesMounted;
+
     /// <summary>
-    /// Construction completes the default scene assembly: default camera pose, default lights, grid
-    /// floor, world-origin axes. The host does not need to call these manually (it only adds its own
-    /// content, such as a URDF robot or demo objects).
+    /// Construction completes the default scene assembly: default camera pose, default lights, grid floor,
+    /// and the world-origin axes when <see cref="ShowWorldAxes"/> is on (it is off by default — the renderer's
+    /// orientation gizmo covers the "which way is up" question without putting geometry in the scene). The
+    /// host does not need to call these manually (it only adds its own content, such as a URDF robot or demo
+    /// objects).
     /// </summary>
     public SceneGraph()
     {
@@ -131,16 +203,105 @@ public class SceneGraph : IDisposable
         Add(fill);
     }
 
-    /// <summary>Creates and adds the default global axes at the world origin based on <see cref="ShowWorldAxes"/>; does not create when off.</summary>
+    /// <summary>Name of the default world-origin axes node (how a re-fit finds the set already in the scene).</summary>
+    public const string WorldAxesName = "world-axes";
+
+    /// <summary>
+    /// Creates and adds the default global axes at the world origin based on <see cref="ShowWorldAxes"/>; does
+    /// not create when off. The set is <see cref="AxesSizing.FixedWorldLength"/> with
+    /// <see cref="WorldAxesLength"/> meters per axis, so it measures the scene instead of tracking the zoom.
+    /// </summary>
     public Axes? AddDefaultWorldAxes()
     {
         if (!ShowWorldAxes)
             return null;
 
-        var axes = new Axes(WorldAxesLength, name: "world-axes") { Transform = { Position = Vector3.Zero } };
+        var axes = new Axes(WorldAxesLength, name: WorldAxesName)
+        {
+            Transform = { Position = Vector3.Zero },
+            Sizing = AxesSizing.FixedWorldLength,
+        };
         axes.SetSubtreePickable(false);   // The axes are a display aid and should not participate in picking.
         Add(axes);
         return axes;
+    }
+
+    /// <summary>
+    /// Sizes the world axes to the scene's content, so a reference axes set stands out beyond the model instead
+    /// of hiding inside it: <see cref="WorldAxesLength"/> becomes the content's largest world extent ×
+    /// <paramref name="factor"/>, and the world axes already in the scene (if any) take that length as well.
+    /// Display aids (the axes themselves, the grid, lights) are ignored while measuring, so calling this twice
+    /// converges instead of growing. Returns the applied length; with nothing measurable in the scene the
+    /// current <see cref="WorldAxesLength"/> is kept and returned.
+    /// </summary>
+    /// <param name="factor">Multiplier on the measured extent (&gt;1 puts the axes past the content).</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="factor"/> is not a positive finite number.</exception>
+    public float FitWorldAxesToContent(float factor = 1.15f)
+    {
+        if (!float.IsFinite(factor) || factor <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(factor), factor, "Factor must be a positive finite value.");
+
+        float extent = MeasureContentExtent();
+        if (extent <= 0f)
+            return WorldAxesLength;
+
+        WorldAxesLength = extent * factor;
+
+        // A set created by an earlier AddDefaultWorldAxes keeps its own copy of the length; push the new value
+        // into it too, so the call works whether it comes before or after creation.
+        foreach (GameObject root in _roots)
+        {
+            if (root is Axes { Name: WorldAxesName } axes)
+                axes.Length = WorldAxesLength;
+        }
+
+        return WorldAxesLength;
+    }
+
+    /// <summary>
+    /// Largest world-space extent of the scene's drawable content (the biggest side of the combined AABB), or 0
+    /// when nothing measurable is in the scene. Axes sets, the grid and lights are skipped: they are display
+    /// aids, and including the axes would make them grow with themselves on every call.
+    /// </summary>
+    private float MeasureContentExtent()
+    {
+        Vector3 min = new(float.PositiveInfinity);
+        Vector3 max = new(float.NegativeInfinity);
+
+        foreach (GameObject root in _roots)
+            MeasureRecursive(root, ref min, ref max);
+
+        if (min.X > max.X)   // Nothing measurable was visited.
+            return 0f;
+
+        Vector3 size = max - min;
+        return MathF.Max(size.X, MathF.Max(size.Y, size.Z));
+    }
+
+    /// <summary>Accumulates a node subtree's world-space AABB corners into <paramref name="min"/>/<paramref name="max"/>.</summary>
+    private static void MeasureRecursive(GameObject node, ref Vector3 min, ref Vector3 max)
+    {
+        if (node is Axes)
+            return;   // An axes set describes the world, it is not part of the world's content.
+
+        if (node.MeshData is { } mesh)
+        {
+            Bounds bounds = mesh.ComputeBounds();
+            Matrix4x4 model = node.Transform.GetModelMatrix();
+            for (int corner = 0; corner < 8; corner++)
+            {
+                var local = new Vector3(
+                    (corner & 1) == 0 ? bounds.Min.X : bounds.Max.X,
+                    (corner & 2) == 0 ? bounds.Min.Y : bounds.Max.Y,
+                    (corner & 4) == 0 ? bounds.Min.Z : bounds.Max.Z);
+                Vector3 world = Vector3.Transform(local, model);
+                min = Vector3.Min(min, world);
+                max = Vector3.Max(max, world);
+            }
+        }
+
+        foreach (Transform child in node.Transform.Children)
+            MeasureRecursive(child.Owner, ref min, ref max);
     }
 
     /// <summary>Poses the camera to the default initial pose (viewing the scene up close).</summary>
@@ -191,6 +352,65 @@ public class SceneGraph : IDisposable
         found.Object.Highlighted = enable;
         return found.Object;
     }
+
+    /// <summary>
+    /// Single-selection entry point: the new object becomes <see cref="Selected"/>, the previous one returns to its
+    /// plain look, and — with <see cref="ShowSelectionAxes"/> on — the new object gets its local axes mounted as an
+    /// ordinary, non-pickable child node (<see cref="GameObject.ShowLocalAxes"/>), so a later click still hits the
+    /// object instead of its marker. That marker is read-only by design: it shows a frame, it never moves one, and
+    /// selecting is never a manipulation mode — a link's pose stays the business of its joint chain. Passing null
+    /// clears the selection. A host that owns its own selection state can keep calling <see cref="PickAndHighlight"/>,
+    /// which only flips the highlight.
+    /// </summary>
+    /// <param name="obj">The object to select, or null to clear the selection.</param>
+    /// <param name="highlight">Whether the newly selected object takes the highlight color (default true).</param>
+    /// <returns>The selected object (the same <paramref name="obj"/>), or null when the selection was cleared.</returns>
+    public GameObject? Select(GameObject? obj, bool highlight = true)
+    {
+        if (ReferenceEquals(obj, Selected))
+            return Selected;
+
+        if (Selected is { } previous)
+        {
+            previous.Highlighted = false;
+
+            // Unmount only what Select mounted: local axes the scene's author turned on deliberately stay on.
+            if (_selectionAxesMounted)
+            {
+                previous.ShowLocalAxes = false;
+                _selectionAxesMounted = false;
+            }
+        }
+
+        Selected = obj;
+        if (obj is null)
+            return null;
+
+        obj.Highlighted = highlight;
+
+        if (ShowSelectionAxes && !obj.ShowLocalAxes)
+        {
+            obj.LocalAxesLength = SelectionAxesLength;
+            obj.ShowLocalAxes = true;
+            if (obj.LocalAxes is { } mounted)
+                mounted.Length = SelectionAxesLength;   // Axes created by an earlier selection take the new length.
+            _selectionAxesMounted = true;
+        }
+
+        return obj;
+    }
+
+    /// <summary>
+    /// Pick-and-select closed loop: runs <see cref="Pick"/> on <paramref name="ray"/> and feeds the hit — or null on a
+    /// miss — through <see cref="Select"/>. One call is a host's whole click path: highlight what was picked, mount
+    /// its axes, drop the previous selection.
+    /// </summary>
+    /// <param name="ray">The ray to test (world coordinates, ideally from <see cref="Camera.ScreenToWorldRay"/>).</param>
+    /// <param name="predicate">Optional filter: objects returning false do not participate.</param>
+    /// <param name="hitInvisible">When true, also hit invisible objects.</param>
+    /// <returns>The object the ray selected, or null when it hit nothing (the selection is cleared).</returns>
+    public GameObject? PickAndSelect(Ray ray, Func<GameObject, bool>? predicate = null, bool hitInvisible = false)
+        => Select(Pick(ray, predicate, hitInvisible)?.Object);
 
     private void PickRecursive(GameObject node, in Ray ray, Func<GameObject, bool>? predicate,
         bool hitInvisible, ref RaycastHit? best)
@@ -286,6 +506,8 @@ public class SceneGraph : IDisposable
         // references, so here we just clear the node lists.
         _roots.Clear();
         _lights.Clear();
+        Selected = null;   // The node list is gone: a stale selection would point into nothing.
+        _selectionAxesMounted = false;
         _disposed = true;
     }
 }

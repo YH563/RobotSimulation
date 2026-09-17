@@ -5,6 +5,24 @@ using RobotSimulation.Core.Rendering;
 namespace RobotSimulation.Core.Scene;
 
 /// <summary>
+/// How an <see cref="Axes"/> set decides the world length of its arrows on every frame.
+/// </summary>
+public enum AxesSizing
+{
+    /// <summary>
+    /// Keep the axes the same size on screen whatever the camera distance (RViz-style screen compensation).
+    /// Good for a small per-object marker, useless as a ruler: the world length then says nothing.
+    /// </summary>
+    ConstantScreenSize,
+
+    /// <summary>
+    /// Pin the arrows to <see cref="Axes.Length"/> world units. The set behaves like a ruler in the scene:
+    /// it can be made to stand out beyond the model, and it shrinks on screen when the camera moves away.
+    /// </summary>
+    FixedWorldLength,
+}
+
+/// <summary>
 /// Coordinate axes (<see cref="GameObject"/>, Model pass): three solid RGB arrows at the origin —
 /// +X red, +Y green, +Z blue (rviz style, more visible than thin lines). The whole set can be
 /// placed/rotated via its <see cref="Transform"/>.
@@ -14,8 +32,33 @@ public sealed class Axes : GameObject
     private static readonly Quaternion ToX = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2f);
     private static readonly Quaternion ToY = Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2f);
 
-    /// <summary>Arrow length (how far each axis extends from the origin).</summary>
-    public float Length { get; }
+    /// <summary>
+    /// Visible world length of each axis (how far each arrow extends from the origin). In
+    /// <see cref="AxesSizing.FixedWorldLength"/> this is exactly what the renderer draws; in
+    /// <see cref="AxesSizing.ConstantScreenSize"/> the drawn length follows the camera distance and this
+    /// value only fixes the arrow geometry's reference length. Setting it re-scales the whole set: the axes
+    /// shader normalises by the arrow's own length, so no geometry has to be rebuilt.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not a positive finite number.</exception>
+    public float Length
+    {
+        get => _length;
+        set
+        {
+            if (value <= 0f || float.IsNaN(value) || float.IsInfinity(value))
+                throw new ArgumentOutOfRangeException(nameof(value), value, "Axis length must be a positive finite value.");
+            _length = value;
+        }
+    }
+
+    private float _length;
+
+    /// <summary>
+    /// How the visible length is decided. <see cref="AxesSizing.ConstantScreenSize"/> (the default) keeps a
+    /// marker legible at any zoom; <see cref="AxesSizing.FixedWorldLength"/> makes the set a scene-space
+    /// reference instead — see <see cref="SceneGraph.FitWorldAxesToContent"/> for sizing it past the model.
+    /// </summary>
+    public AxesSizing Sizing { get; set; } = AxesSizing.ConstantScreenSize;
 
     // ---- Constant screen size parameters (managed internally by the axes; the Renderer only reads) ----
 
@@ -53,7 +96,7 @@ public sealed class Axes : GameObject
     {
         if (length <= 0f || float.IsNaN(length) || float.IsInfinity(length))
             throw new ArgumentOutOfRangeException(nameof(length), length, "Axis length must be a positive finite value.");
-        Length = length;
+        _length = length;   // Already validated above; the property setter's own check would only rename the parameter.
 
         var x = new Arrow(length, shaftRadius, headRadius, headLength,
             new Vector4(0.90f, 0.20f, 0.20f, 1f), 24, "axes_x")
@@ -68,7 +111,8 @@ public sealed class Axes : GameObject
         var z = new Arrow(length, shaftRadius, headRadius, headLength,
             new Vector4(0.25f, 0.45f, 1f, 1f), 24, "axes_z");
 
-        // Axis arrows go through the dedicated "constant size" pass (shader screen compensation), not the normal lit model pass.
+        // Axis arrows go through the dedicated axes pass (which stretches them to whatever length the owning
+        // Axes asks for), not the normal lit model pass.
         x.MaterialData!.PassKind = RenderPassKind.Axes;
         y.MaterialData!.PassKind = RenderPassKind.Axes;
         z.MaterialData!.PassKind = RenderPassKind.Axes;

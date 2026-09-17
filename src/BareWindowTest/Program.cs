@@ -80,8 +80,11 @@ public static class Program
     private static IRenderer _renderer = null!;
     private static SceneGraph _scene = null!;
 
-    /// <summary>The currently picked object (single selection: a new pick replaces it, a miss clears it).</summary>
-    private static GameObject? _selected;
+    // The framebuffer GL actually draws into, in pixels. Silk reports it separately from the window size, and
+    // on a scaled display the two are not the same rectangle. The renderer, the camera aspect and the pick ray
+    // all describe this one size (see SyncViewport), so the picture and the ray cannot disagree about where a
+    // pixel is.
+    private static Vector2D<int> _pixelViewport;
 
     // Smoke mode: > 0 means "render this many frames, then close the window".
     private static long _framesToRender = -1;
@@ -90,13 +93,15 @@ public static class Program
 
     private static double _statsAccumulator;
 
-    // Pointer state: the button that started the current drag (null when idle), whether the pointer has
-    // moved far enough for the release to count as a drag, and the two positions used for the delta and
-    // the click/drag classifier. The same four fields carry the same meaning in the Avalonia host.
+    // Pointer state: the button that started the current gesture (null when idle), whether the pointer has
+    // moved far enough for the release to count as a drag, the press position (click/drag classifier and
+    // the origin of every drag displacement) and the camera pose captured at press time. The same fields
+    // carry the same meaning in the Avalonia host: a click must not move the camera, because the pick is
+    // only correct against the frame the user clicked on.
     private static MouseButton? _dragButton;
     private static bool _dragged;
     private static Vector2 _pressPosition;
-    private static Vector2 _lastPosition;
+    private static CameraPose _pressCamera;
 
     public static int Main(string[] args)
     {
@@ -119,6 +124,7 @@ public static class Program
             _window.Load += OnLoad;
             _window.Render += OnRender;
             _window.Resize += OnResize;
+            _window.FramebufferResize += OnResize;
             _window.Closing += OnClosing;
 
             if (_framesToRender > 0)
@@ -183,7 +189,7 @@ public static class Program
         // would only hide what the library already does for a new embedder.
         _scene = new SceneGraph();
         _graphics.Resized += (width, height) => _scene.Camera.AspectRatio = width / (float)height;
-        _graphics.Resize(_window.Size.X, _window.Size.Y);
+        SyncViewport();
 
         LoadRobot(_scene);
 
@@ -262,10 +268,50 @@ public static class Program
         }
     }
 
-    private static void OnResize(Vector2D<int> size)
+    private static void OnResize(Vector2D<int> size) => SyncViewport();
+
+    /// <summary>
+    /// Syncs the viewport to the size of the framebuffer GL is rendering into and remembers it for picking —
+    /// the bare-window counterpart of the Avalonia host's viewport control. Silk reports the framebuffer size
+    /// separately from the window size ("may differ from the window size"), and on a scaled display the two
+    /// are indeed different rectangles: a host that draws into, or casts rays through, the window size while
+    /// the picture fills the framebuffer is off by that ratio, further the closer the cursor is to the edge of
+    /// the picture. The size is logged once per change, so the two numbers are on the record instead of being
+    /// assumed equal.
+    /// </summary>
+    private static void SyncViewport()
     {
-        _graphics.Resize(size.X, size.Y);
-        _scene.Camera.AspectRatio = size.X / (float)size.Y;
+        Vector2D<int> surface = _window.FramebufferSize;
+        if (surface.X <= 0 || surface.Y <= 0)
+            surface = _window.Size; // Some backends report no framebuffer size; then the window size is all we have.
+
+        _graphics.Resize(surface.X, surface.Y);
+        _scene.Camera.AspectRatio = surface.X / (float)surface.Y;
+
+        if (surface.X == _pixelViewport.X && surface.Y == _pixelViewport.Y)
+            return;
+
+        _pixelViewport = surface;
+        Vector2D<int> windowSize = _window.Size;
+        Logger.Info($"Viewport: {surface.X}x{surface.Y} px from framebuffer | window " +
+                    $"{windowSize.X}x{windowSize.Y} px, scale " +
+                    $"{surface.X / (float)Math.Max(1, windowSize.X):F4} px/unit");
+    }
+
+    /// <summary>
+    /// Window pointer coordinates (what the input backend reports) → framebuffer pixels. The two spaces
+    /// coincide only when the framebuffer happens to be the same size as the window; going through the
+    /// measured ratio is what keeps the ray on the pixel the user is looking at.
+    /// </summary>
+    private static Vector2 PixelsFromWindowPoint(Vector2 position)
+    {
+        Vector2D<int> windowSize = _window.Size;
+        if (windowSize.X <= 0 || windowSize.Y <= 0)
+            return position;
+
+        return new Vector2(
+            position.X * (_pixelViewport.X / (float)windowSize.X),
+            position.Y * (_pixelViewport.Y / (float)windowSize.Y));
     }
 
     // ------------------------------------------------------------------
@@ -277,12 +323,13 @@ public static class Program
 
     private static void OnMouseDown(IMouse mouse, MouseButton button)
     {
-        if (button is not (MouseButton.Left or MouseButton.Middle or MouseButton.Right))
+        if (button is not (MouseButton.Left or MouseButton.Middle or MouseButton.Right) || _scene is null)
             return;
 
         _dragButton = button;
         _dragged = false;
-        _pressPosition = _lastPosition = mouse.Position;
+        _pressPosition = mouse.Position;
+        _pressCamera = CameraPose.Capture(_scene.Camera); // A click has to keep the camera exactly here.
     }
 
     private static void OnMouseMove(IMouse mouse, Vector2 position)
@@ -290,24 +337,34 @@ public static class Program
         if (_dragButton is not { } button || _scene is null)
             return;
 
-        Vector2 delta = position - _lastPosition;
-        _lastPosition = position;
+        Vector2 total = position - _pressPosition;
 
-        // A clear drag happened → the release must not be treated as a pick.
-        if (Distance(position, _pressPosition) > ClickDragThresholdPixels)
+        // Inside the threshold (the pointer jitter of an ordinary click) the camera is deliberately left
+        // alone: the pose captured at press time is the one the release will pick through. Only a clear
+        // drag may move it.
+        if (!_dragged && total.Length() > ClickDragThresholdPixels)
             _dragged = true;
+
+        if (!_dragged)
+            return;
+
+        // A drag is applied as the *total* displacement from the press point on top of the press-time pose
+        // instead of per-event deltas: the camera cannot jump when the threshold is crossed and rounding
+        // cannot accumulate into a slow drift away from the cursor.
+        Camera camera = _scene.Camera;
+        _pressCamera.Restore(camera);
 
         switch (button)
         {
             case MouseButton.Left:
                 // Screen Y grows downward while camera pitch grows upward: negate dy or dragging is inverted.
-                _scene.Camera.Rotate(-delta.X * RotateDegreesPerPixel, -delta.Y * RotateDegreesPerPixel);
+                camera.Rotate(-total.X * RotateDegreesPerPixel, -total.Y * RotateDegreesPerPixel);
                 break;
             case MouseButton.Middle:
-                _scene.Camera.Pan(delta * PanScale);
+                camera.Pan(total * PanScale);
                 break;
             case MouseButton.Right:
-                _scene.Camera.Zoom(-delta.Y * ZoomPerDragPixel); // Drag up (dy<0) → zoom in.
+                camera.Zoom(-total.Y * ZoomPerDragPixel); // Drag up (dy<0) → zoom in.
                 break;
         }
     }
@@ -319,9 +376,14 @@ public static class Program
 
         _dragButton = null;
 
-        // A click (press + release without moving) selects; a drag only orbits the camera.
-        if (!_dragged)
-            PickAt(mouse.Position);
+        // A click (press + release without moving) selects; a drag only orbits the camera. The pointer may
+        // still have jittered inside the threshold, so the camera is put back exactly where it was when the
+        // button went down: the ray is then cast through the picture the user clicked on.
+        if (_dragged || _scene is null)
+            return;
+
+        _pressCamera.Restore(_scene.Camera);
+        PickAt(mouse.Position);
     }
 
     private static void OnMouseScroll(IMouse mouse, ScrollWheel wheel)
@@ -339,23 +401,39 @@ public static class Program
     private static void PickAt(Vector2 position)
     {
         SceneGraph scene = _scene!;
-        Ray ray = scene.Camera.ScreenToWorldRay(position, new Vector2(_window.Size.X, _window.Size.Y));
 
-        GameObject? picked = scene.PickAndHighlight(ray, enable: true);
+        // The pointer arrives in window coordinates while the picture lives in the framebuffer: converting
+        // through the measured ratio (see SyncViewport) is what makes the ray go through the pixel the user
+        // sees, whatever the display scale does to the two sizes.
+        Ray ray = scene.Camera.ScreenToWorldRay(
+            PixelsFromWindowPoint(position), new Vector2(_pixelViewport.X, _pixelViewport.Y));
 
-        // Single selection: a new hit replaces the previous one, a miss clears it.
-        if (_selected is { } previous && !ReferenceEquals(previous, picked))
-            previous.Highlighted = false;
-        if (picked is null && _selected is not null)
-            _selected.Highlighted = false;
-        _selected = picked;
+        // Single selection with feedback: the scene owns the selection, so a new hit replaces the previous one (its
+        // highlight and its local axes go away) and a miss clears it. The axes it mounts on the hit are the same
+        // marker the corner gizmo shows, but for the picked node's own frame.
+        GameObject? picked = scene.PickAndSelect(ray);
 
         Logger.Info(picked is null ? "Pick: nothing selected" : $"Pick: selected '{picked.Name}'");
     }
 
-    /// <summary>Pixel distance between two points (the click / drag classifier).</summary>
-    private static double Distance(Vector2 a, Vector2 b)
-        => (a - b).Length();
+    /// <summary>
+    /// The orbit state a click is required to preserve: captured when the button goes down and put back
+    /// before the ray is cast, because picking is only meaningful against the frame the user clicked on.
+    /// The Avalonia host carries the same type, so both hosts classify and apply pointer input identically.
+    /// </summary>
+    private readonly record struct CameraPose(float Yaw, float Pitch, float Distance, Vector3 Target)
+    {
+        public static CameraPose Capture(Camera camera)
+            => new(camera.Yaw, camera.Pitch, camera.Distance, camera.Target);
+
+        public void Restore(Camera camera)
+        {
+            camera.Target = Target;
+            camera.Distance = Distance;
+            camera.Yaw = Yaw;
+            camera.Pitch = Pitch;
+        }
+    }
 
     private static void OnKeyDown(IKeyboard keyboard, Key key, int code)
     {

@@ -22,6 +22,7 @@ internal static class Program
     private static long _smokeFrames = -1;
     private static long _framesRendered;
     private static bool _smokeCompleted;
+    private static string? _pickCheckFailure;
 
     /// <summary>
     /// Frames a <c>--smoke</c> run must render before exiting, or <c>-1</c> when not in smoke mode. The
@@ -75,8 +76,11 @@ internal static class Program
     }
 
     /// <summary>
-    /// <c>--smoke [frames]</c> switches to the CI smoke mode; there is no other switch (the bare-window
-    /// host has the identical parser). Unknown arguments are reported and ignored.
+    /// <c>--smoke [frames]</c> switches to the CI smoke mode: that many frames have to be rendered *and* the
+    /// viewport's pick self-check has to pass (see <see cref="Controls.RobotViewportControl"/>), so a run also
+    /// proves that this host's pointer conversion agrees with the framebuffer it drew into — at the display
+    /// scale the machine happens to have. There is no other switch (the bare-window host has the identical
+    /// parser). Unknown arguments are reported and ignored.
     /// </summary>
     private static void ParseArguments(string[] args)
     {
@@ -110,14 +114,28 @@ internal static class Program
     }
 
     /// <summary>
+    /// Records that the viewport's pick self-check failed (see
+    /// <see cref="Controls.RobotViewportControl"/>). A smoke run then fails as well: a host whose clicks do
+    /// not agree with the picture it drew is not "smoke tested", however many frames it rendered.
+    /// </summary>
+    internal static void ReportPickCheckFailure(string report) => _pickCheckFailure = report;
+
+    /// <summary>
     /// Turns the desktop lifetime's exit code into the process exit code: a smoke run counts as
-    /// successful only when it rendered every requested frame, so a window closed early (or a control
-    /// that failed to initialize) fails even though Avalonia reported success.
+    /// successful only when the pick self-check passed and every requested frame was rendered, so a window
+    /// closed early, a control that failed to initialize and clicks that no longer agree with the picture all
+    /// fail even though Avalonia reported success.
     /// </summary>
     private static int VerifySmoke(int exitCode)
     {
         if (_smokeFrames <= 0)
             return exitCode;
+
+        if (_pickCheckFailure is not null)
+        {
+            Logger.Error($"Smoke failed: {_pickCheckFailure}");
+            return 1;
+        }
 
         if (exitCode != 0)
         {

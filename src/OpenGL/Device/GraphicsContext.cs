@@ -26,6 +26,14 @@ public sealed class GraphicsContext : IRenderContext
     private bool _disposed;
 
     /// <summary>
+    /// Size (pixels) of the last viewport the host set through <see cref="Resize"/>. Screen-space overlays
+    /// drawn by the renderer (the orientation gizmo) need to know how large the surface is in order to
+    /// place themselves relative to its bottom-right corner, and the viewport is the host's own statement of
+    /// that rectangle — the renderer never guesses the window size.
+    /// </summary>
+    internal (int Width, int Height) ViewportSize { get; private set; }
+
+    /// <summary>
     /// Device entry point: the host injects a GL instance created on the render thread, which is adapted
     /// into an <see cref="IRenderContext"/>; after that GL no longer propagates outward.
     /// </summary>
@@ -64,6 +72,7 @@ public sealed class GraphicsContext : IRenderContext
     {
         if (width <= 0 || height <= 0) return;
         _gl.Viewport(0, 0, (uint)width, (uint)height);
+        ViewportSize = (width, height);
         Resized?.Invoke(width, height);
     }
 

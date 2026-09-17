@@ -34,8 +34,35 @@ public sealed class Renderer : IRenderer
     /// <summary>Frames a cached resource may go unused before its buffers are released.</summary>
     private const int MaxIdleFrames = 240;
 
+    /// <summary>Distance of the orientation gizmo's eye from its origin (world units; only the direction matters).</summary>
+    private const float GizmoEyeDistance = 3f;
+
+    /// <summary>
+    /// Edge length of the orientation gizmo's orthographic view, in world units. The arrows are 1 unit long, so a
+    /// width of 2.2 makes the marker fill its square (≈72 px per axis at the 160 px default) with just enough room
+    /// left for the arrow heads — the widget draws nothing else around them, so the square viewport is all the
+    /// margin it needs.
+    /// </summary>
+    private const float GizmoViewWidth = 2.2f;
+
+    /// <summary>Radius of the hub ball at the gizmo's origin, in the gizmo's own units (≈7 px at the default size).</summary>
+    private const float GizmoHubRadius = 0.10f;
+
     private readonly GL _gl;
+    private readonly GraphicsContext _device;
     private readonly ShaderProgram _modelShader;
+
+    /// <summary>
+    /// CPU-side axes set the orientation gizmo draws: the same three arrows a world axes set uses, drawn through
+    /// the same axes pass. <see cref="AxesSizing.FixedWorldLength"/> with a 1-unit length keeps the marker at a
+    /// constant pixel size under the gizmo's orthographic projection, whatever the camera distance is.
+    /// </summary>
+    private readonly Axes _gizmoAxes = new(1f, shaftRadius: 0.032f, headRadius: 0.095f, headLength: 0.28f,
+        name: "orientation-gizmo")
+    {
+        Sizing = AxesSizing.FixedWorldLength,
+    };
+
     /// <summary>Maximum point size supported by the driver (GL_POINT_SIZE_RANGE upper bound), used to clamp uPointSize when drawing point clouds.</summary>
     private readonly float _maxPointSize;
 
@@ -57,6 +84,7 @@ public sealed class Renderer : IRenderer
     {
         ArgumentNullException.ThrowIfNull(device);
         _gl = device.NativeGl;
+        _device = device;
 
         // Compile all embedded standard pass shaders (Model/Line/Point/Skybox/Axes) — fail fast at startup
         // rather than discovering a GLSL error mid-run; the host does not manage shader file paths.
@@ -76,6 +104,16 @@ public sealed class Renderer : IRenderer
         _maxPointSize = pointSizeRange.Y;
 
         _modelShader = _passShaders[RenderPassKind.Model];
+
+        // The gizmo's hub: a small unlit ball at the marker's origin that hides the three shafts' butts and gives
+        // the widget a solid pivot. It is an extra child of the same 1-unit axes set, so the axes pass leaves it at
+        // scale 1 (only arrow geometry is stretched to the set's length) and the arrows start where it ends.
+        var hub = new Sphere(GizmoHubRadius, segments: 24, rings: 12, name: "orientation-gizmo-hub")
+        {
+            Transform = { Parent = _gizmoAxes.Transform },
+        };
+        hub.MaterialData!.PassKind = RenderPassKind.Axes;
+        hub.MaterialData.BaseColor = new Vector4(0.87f, 0.89f, 0.93f, 1f);
     }
 
     /// <summary>Gets the shader program for a pass (for future line/point/skybox drawing extensions).</summary>
@@ -149,6 +187,11 @@ public sealed class Renderer : IRenderer
 
         foreach (GameObject root in scene.Roots)
             RenderNode(root, scene, view, projection);
+
+        // Last, so it lands on top of the finished picture rather than inside it (see the method for how its
+        // own viewport and depth clear are confined to the corner square).
+        if (scene.ShowOrientationGizmo)
+            DrawOrientationGizmo(scene);
     }
 
     /// <summary>Writes the light parameters into the default shader's uniform array.</summary>
@@ -207,11 +250,21 @@ public sealed class Renderer : IRenderer
     }
 
     /// <summary>
-    /// Axes pass: an axis follows the object's placement/rotation but has a constant visual size (the
-    /// shader does isotropic scaling). The constant-size parameters are managed by <see cref="Axes"/>
-    /// itself (ScreenScale/Min/Max); the Renderer only reads them.
+    /// Axes pass: an axis follows the object's placement/rotation, while its visible length is decided by the
+    /// owning <see cref="Axes"/> — constant on screen, or fixed in world units. The Renderer only reads those
+    /// parameters; see <see cref="DrawAxesPassNode"/>.
     /// </summary>
     private void DrawAxesNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
+        => DrawAxesPassNode(node, scene.Camera.Position, view, projection);
+
+    /// <summary>
+    /// Draws one node of an axes set through the axes pass: only the node's world rotation and origin are used, and
+    /// the shader stretches its geometry to the length the owning <see cref="Axes"/> asks for. Used for the arrows
+    /// and for the gizmo's hub ball — the pass leaves that at scale 1, since only <see cref="Arrow"/> geometry is
+    /// stretched. Shared by the scene's axes sets and by the screen-space orientation gizmo, which is why the eye
+    /// position is a parameter instead of being read from the camera.
+    /// </summary>
+    private void DrawAxesPassNode(GameObject node, Vector3 eyePosition, Matrix4x4 view, Matrix4x4 projection)
     {
         Matrix4x4 model = node.Transform.GetModelMatrix();
         Vector3 origin = model.Translation;
@@ -221,14 +274,30 @@ public sealed class Renderer : IRenderer
         Matrix4x4.Decompose(model, out _, out Quaternion rot, out _);
         Matrix4x4 axisModel = Matrix4x4.CreateFromQuaternion(rot) * Matrix4x4.CreateTranslation(origin);
 
-        // The arrow is along local +Z with total length Arrow.Length, used as the reference length.
+        // Arrows run along local +Z with total length Arrow.Length, used as the reference length; anything else in
+        // an axes set (the gizmo's hub) is a unit-sized shape the shader must leave alone.
         float refLocalLen = (node as Arrow)?.Length ?? 1f;
 
-        // Constant-size parameters come from the owning Axes (managed internally by the axes).
-        Axes? axes = node.Transform.Parent?.Owner as Axes;
-        float ratio = axes?.ScreenScale ?? Axes.DefaultScreenScale;
-        float minLen = axes?.MinWorldLength ?? Axes.DefaultMinLength;
-        float maxLen = axes?.MaxWorldLength ?? Axes.DefaultMaxLength;
+        // Length policy, managed internally by the owning Axes and only read here. FixedWorldLength needs no
+        // shader change: the shader computes clamp(ratio * cameraDistance, min, max), so ratio = 0 with both
+        // bounds equal to the wanted length is exactly that length in world units.
+        float ratio = Axes.DefaultScreenScale;
+        float minLen = Axes.DefaultMinLength;
+        float maxLen = Axes.DefaultMaxLength;
+        if (node.Transform.Parent?.Owner is Axes axes)
+        {
+            if (axes.Sizing == AxesSizing.FixedWorldLength)
+            {
+                ratio = 0f;
+                minLen = maxLen = axes.Length;
+            }
+            else
+            {
+                ratio = axes.ScreenScale;
+                minLen = axes.MinWorldLength;
+                maxLen = axes.MaxWorldLength;
+            }
+        }
 
         ShaderProgram shader = GetPassShader(RenderPassKind.Axes);
         shader.Use();
@@ -238,12 +307,71 @@ public sealed class Renderer : IRenderer
         shader.SetUniform("uAxesRatio", ratio);
         shader.SetUniform("uAxesMinLength", minLen);
         shader.SetUniform("uAxesMaxLength", maxLen);
-        shader.SetUniform("uViewPos", scene.Camera.Position);
+        shader.SetUniform("uViewPos", eyePosition);
         shader.SetUniform("uView", view);
         shader.SetUniform("uProjection", projection);
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
 
         GetOrCreateMesh(node.MeshData!).Draw();
+    }
+
+    /// <summary>
+    /// Draws the orientation gizmo: a screen-space axes widget — three RGB arrows and a hub ball, nothing else —
+    /// pinned to the viewport's bottom-right corner and following the camera's orientation (see
+    /// <see cref="SceneGraph.ShowOrientationGizmo"/>). It is the screen-space counterpart of a scene axes set: it is
+    /// drawn after the scene, into its own viewport, with the depth buffer cleared inside that square, so it is
+    /// never occluded by geometry, keeps a constant pixel size at any zoom, and, being no scene node, can never be
+    /// picked.
+    /// </summary>
+    private void DrawOrientationGizmo(SceneGraph scene)
+    {
+        (int surfaceWidth, int surfaceHeight) = _device.ViewportSize;
+        if (surfaceWidth <= 0 || surfaceHeight <= 0)
+            return;   // The host has not sized a viewport yet: there is nothing to anchor the gizmo to.
+
+        int size = (int)MathF.Round(Math.Clamp(scene.OrientationGizmoSize, 16f,
+            MathF.Max(16f, Math.Min(surfaceWidth, surfaceHeight))));
+        int margin = (int)MathF.Round(MathF.Max(0f, scene.OrientationGizmoMargin));
+        int left = Math.Max(0, surfaceWidth - size - margin);
+        int bottom = Math.Max(0, margin);   // GL's origin is the bottom-left corner, so this is the bottom-right one.
+
+        // The scissor box is what confines the depth clear to the gizmo's square: glClear ignores the viewport, so
+        // without it the whole frame's depth would be wiped (harmless here, the scene is already drawn, but not
+        // something to rely on).
+        _gl.Enable(EnableCap.ScissorTest);
+        _gl.Scissor(left, bottom, (uint)size, (uint)size);
+        _gl.Viewport(left, bottom, (uint)size, (uint)size);
+        _gl.Clear(ClearBufferMask.DepthBufferBit);
+
+        // The marker is always drawn solid: ApplyRenderState is per material, so the last model node may have
+        // left a wireframe polygon mode behind and a wireframe gizmo is not a legible marker.
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+
+        // Orientation only: the eye keeps the camera's direction (so the marker turns exactly with the view) but
+        // sits at a fixed distance, and the orthographic projection turns that into a constant pixel size. Up is
+        // +Z — the same convention Camera.GetViewMatrix uses.
+        Camera camera = scene.Camera;
+        Vector3 fromTarget = camera.Position - camera.Target;
+        Vector3 eye = fromTarget.LengthSquared() > 1e-8f
+            ? Vector3.Normalize(fromTarget) * GizmoEyeDistance
+            : new Vector3(0f, -GizmoEyeDistance, 0f);
+        Matrix4x4 view = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitZ);
+        Matrix4x4 projection = Matrix4x4.CreateOrthographic(GizmoViewWidth, GizmoViewWidth, 0.1f, 10f);
+
+        // Straight to the marker: the widget is just the three arrows plus the hub ball, so there is no backdrop to
+        // lay down first and nothing can hide it inside its own square.
+        foreach (Transform child in _gizmoAxes.Transform.Children)
+        {
+            if (child.Owner.MeshData is null)
+                continue;   // A child without geometry has nothing to draw; the arrows always carry a mesh.
+            DrawAxesPassNode(child.Owner, eye, view, projection);
+        }
+
+        // Restore the full surface: the host owns the viewport and may set it only when its size changes (which is
+        // what the bare-window host does), so leaving the gizmo's small viewport behind would shrink the whole
+        // picture until the next resize.
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.Viewport(0, 0, (uint)surfaceWidth, (uint)surfaceHeight);
     }
 
     private void DrawModelNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
