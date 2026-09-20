@@ -310,8 +310,11 @@ public sealed class RobotModel : GameObject
         Joint joint = _drivableJoints[index];
         GameObject childLink = _drivableChildLinks[index];
 
-        // Child-link local pose = joint.origin * joint motion(q); row-major, consistent with GetModelMatrix chaining.
-        Matrix4x4 local = joint.Origin * JointMotion(joint, _jointValues[index]);
+        // Child-link local pose = joint motion(q) * joint.origin. URDF gives the child pose as p_parent = origin ∘ R_axis(q)
+        // (translate/rotate the child frame by origin, with the joint motion applied inside that frame); this library's
+        // row-form convention writes a product A * B as "A first, then B", so reversing the URDF column order gives
+        // motion * origin — the same order GetModelMatrix() then chains as local * parent.
+        Matrix4x4 local = JointMotion(joint, _jointValues[index]) * joint.Origin;
         ApplyPose(childLink.Transform, local);
     }
 

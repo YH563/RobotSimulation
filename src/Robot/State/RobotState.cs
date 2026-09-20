@@ -222,7 +222,11 @@ public sealed class RobotState
             }
 
             int parentIndex = _topoIndexOf[joint.ParentLinkName];
-            _poses[i] = _poses[parentIndex] * joint.Origin * JointMotion(joint, ValueOf(joint));
+
+            // Row-form convention (A * B = "A first, then B"): the joint motion acts inside the joint frame, so it is
+            // applied before joint.Origin, and origin before the already-accumulated parent chain. This mirrors
+            // Transform.GetModelMatrix()'s local * parent chaining, keeping RobotState and the scene tree in agreement.
+            _poses[i] = JointMotion(joint, ValueOf(joint)) * joint.Origin * _poses[parentIndex];
         }
 
         _dirty = false;
