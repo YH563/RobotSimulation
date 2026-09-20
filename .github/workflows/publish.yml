@@ -14,7 +14,10 @@ name: publish
 #   2) 本仓库 Settings → Secrets and variables → Actions → New repository secret：
 #        NUGET_USER = 你的 nuget.org 用户名（不是邮箱；不想用 secret 也可直接把它写进下面的 user:）
 #
-# 发布新版本：先改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），再到 Actions 页面 Run workflow。
+# 发布新版本：先改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），打一个带注解的
+# tag 并推送（注解正文就是 Release 说明，第一行会被当成 Release 标题），再到 Actions 页面 Run workflow。
+# 一次运行做两件事：推三个包到 nuget.org（publish job），再按 tag 注解建 / 更新对应的 GitHub Release
+# （release job，见文件末尾；它只拿到 contents: write，推包那步仍然只有 contents: read）。
 on:
   workflow_dispatch:
   # 想改成「推 tag 自动发布」就取消下面注释。注意：部分平台的 OIDC ref claim 不接受 tag，
@@ -89,3 +92,74 @@ jobs:
             dotnet nuget push "artifacts/RobotSimulation.$p.*.snupkg" \
               --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
           done
+
+  # 包推成功后，按 tag 注解建 / 更新对应的 GitHub Release。单独一个 job 是为了最小权限：
+  # contents: write 只给这里（建 / 改 Release 需要），推包那步仍然只有 contents: read + id-token: write。
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 读 tag 的注解正文要完整的 tag 对象，浅克隆拿不到
+
+      - name: Show what is being released
+        run: |
+          echo "ref    : $GITHUB_REF  ($GITHUB_REF_NAME)"
+          echo "commit : $(git rev-parse HEAD)"
+
+      - name: Create or update the GitHub Release for this version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # 版本号唯一来源仍然是 Directory.Build.props（与 publish job 用的是同一个）
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error::Directory.Build.props 里没读到 <Version>，无法确定要发布哪个 tag。"
+            exit 1
+          fi
+          tag="v$version"
+          echo "版本 $version -> tag $tag"
+
+          # 沿用「先推 tag，再 Run workflow」的流程：tag 不在远端就直接报错，避免默默建出一个没有
+          # 注解正文的 Release（下面的 --verify-tag 也会再挡一次）。
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::远端没有 tag $tag。请先 git tag -a $tag（注解正文写 Release 说明）并 git push origin $tag，或核对 Directory.Build.props 的 <Version>。"
+            exit 1
+          fi
+
+          # tag 指向的提交与本次运行的提交不一致时只提醒、不阻断：出错重跑、或本次运行选了别的 ref
+          # （例如 master 已经往前走了）都可能这样。
+          tag_sha="$(git rev-parse "$tag^{}")"
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::warning::tag $tag 指向 $tag_sha，本次运行的是 $GITHUB_SHA，两者不同，请确认是否符合预期。"
+          fi
+
+          # 正文 = tag 注解去掉第一行（第一行当标题），与手工发布的排版保持一致。
+          # 注意：轻量 tag 上没有注解，git 会把提交信息当正文读出来，所以先判类型，别静默用错东西。
+          notes="$(mktemp)"
+          args=()
+          if [ "$(git cat-file -t "$tag")" = tag ]; then
+            git tag -l --format='%(contents:body)' "$tag" >"$notes"
+          fi
+          if [ -s "$notes" ]; then
+            args+=(--notes-file "$notes")
+          else
+            echo "::warning::tag $tag 不是带注解的 tag（或注解没有正文），改用 GitHub 自动生成的 release notes；想自己写排版请用 git tag -a $tag。"
+            args+=(--generate-notes)
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag 已存在，更新标题与正文。"
+            gh release edit "$tag" --title "RobotSimulation $version" "${args[@]}"
+          else
+            echo "Release $tag 不存在，创建。"
+            gh release create "$tag" --title "RobotSimulation $version" --verify-tag "${args[@]}"
+          fi
+
+          gh release view "$tag" --json name,tagName,isDraft,isLatest,url \
+            | jq -r '"\(.name)  \(.tagName)  draft=\(.isDraft)  latest=\(.isLatest)  \(.url)"'
