@@ -90,11 +90,20 @@ jobs:
             exit 1
           fi
           # 依赖先行：Core -> Robot -> OpenGL；.snupkg 用同一把临时 key 推，nuget.org 会自动挂上符号。
+          #
+          # 每个包先推 .nupkg 再推 .snupkg。别写成 "RobotSimulation.$p.*.nupkg"：那个 glob 连
+          # .snupkg 也匹配（snupkg 以 nupkg 结尾），符号包会被推两遍——第二遍只能靠
+          # --skip-duplicate 变成 Conflict 收场，日志里看着像失败。所以先用 bash 把两类文件分开。
           for p in Core Robot OpenGL; do
-            dotnet nuget push "artifacts/RobotSimulation.$p.*.nupkg" \
-              --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
-            dotnet nuget push "artifacts/RobotSimulation.$p.*.snupkg" \
-              --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            for f in artifacts/RobotSimulation."$p".*.nupkg; do
+              case "$f" in *.snupkg) continue ;; esac
+              dotnet nuget push "$f" \
+                --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            done
+            for f in artifacts/RobotSimulation."$p".*.snupkg; do
+              dotnet nuget push "$f" \
+                --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            done
           done
 
   # 包推成功后，按 tag 注解建 / 更新对应的 GitHub Release。单独一个 job 是为了最小权限：
