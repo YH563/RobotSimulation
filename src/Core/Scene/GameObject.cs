@@ -26,6 +26,16 @@ public class GameObject
     /// </summary>
     public Transform Transform { get; }
 
+    /// <summary>
+    /// The scene that currently holds this node as one of its <see cref="SceneGraph.Roots"/>, or null while the
+    /// node is outside every scene. It is what lets <see cref="Transform.Parent"/> find the scene a re-parent has
+    /// to be routed through — instead of editing a child list the renderer may be walking — and the scene keeps it
+    /// in step as the node joins and leaves its root list. Only root nodes carry it: a descendant belongs to the
+    /// same scene as its root (<see cref="Transform.FindScene"/> walks up to it), which is why attaching a subtree
+    /// needs no per-node bookkeeping.
+    /// </summary>
+    internal SceneGraph? RegisteredScene { get; set; }
+
     /// <summary>3D model data (CPU vertices/indices). null means the node has no geometry (a skeleton/pure hierarchy node).</summary>
     public MeshData? MeshData { get; set; }
 
@@ -87,12 +97,19 @@ public class GameObject
     /// <summary>Material description (CPU). null means the node is not drawn (or uses a default appearance).</summary>
     public MaterialData? MaterialData { get; set; }
 
-    /// <summary>Whether the renderer draws this node and its subtrees (invisible nodes are skipped unless a pick asks for them).</summary>
+    /// <summary>
+    /// Whether the node takes part in the picture. Off means the <em>whole subtree</em> is skipped: the renderer
+    /// stops at an invisible node instead of descending into it, so hiding a parent turns a group off in one write.
+    /// Ray picking follows the same grouping by default — see <see cref="SceneGraph.Pick"/>, which only reaches
+    /// invisible objects when it is explicitly asked to with <c>hitInvisible</c>.
+    /// </summary>
     public bool Visible { get; set; } = true;
 
     /// <summary>
-    /// Whether highlighted (default false). The renderer does one thing for a highlighted node: blends
-    /// the final color toward <see cref="HighlightColor"/> (tint), for selection visual feedback.
+    /// Whether highlighted (default false). The renderer does one thing for a highlighted node: the Model pass
+    /// blends the final color toward <see cref="HighlightColor"/> (tint), for selection visual feedback. The
+    /// line/point/axes passes draw unlit and ignore it — those are the display aids that never take part in
+    /// picking anyway.
     /// Default off; the robot (<c>RobotModel</c>) is not highlighted by default, and the host sets it to
     /// true on a mouse hit via <see cref="SceneGraph.PickAndHighlight"/>.
     /// </summary>

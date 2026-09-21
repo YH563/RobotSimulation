@@ -17,8 +17,16 @@ public class Transform
     /// <summary>Scene node this transform belongs to (set once, at construction).</summary>
     public GameObject Owner { get; }
 
-    /// <summary>Child transforms, in attach order (kept in sync automatically by <see cref="Parent"/>).</summary>
-    public List<Transform> Children { get; } = new();
+    /// <summary>
+    /// Child transforms, in attach order (kept in sync automatically by <see cref="Parent"/>). Read-only: the tree
+    /// is relinked by assigning <see cref="Parent"/> and never by editing this list, so a renderer walking it cannot
+    /// meet a list that someone else is inserting into. Use <see cref="Parent"/> (which routes a change made on a
+    /// thread the scene does not own through the scene's frame boundary).
+    /// </summary>
+    public IReadOnlyList<Transform> Children => _children;
+
+    /// <summary>The live child list. Private to the library: re-linking the tree is <see cref="Parent"/>'s job (or the scene's, when it applies a queued change), never a caller's.</summary>
+    private readonly List<Transform> _children = new();
 
     private Vector3 _position = Vector3.Zero;
     private Quaternion _rotation = Quaternion.Identity;
@@ -95,16 +103,82 @@ public class Transform
     /// <summary>
     /// Parent transform, or null for a scene root. Assigning re-links the child lists on both sides
     /// (the previous parent drops this transform, the new one gains it).
+    /// <para>
+    /// On a node that already belongs to a scene the assignment goes through that scene
+    /// (<see cref="SceneGraph.ApplyParentChange"/>): applied at once on the scene's owner thread, queued — and so
+    /// visible after the next frame boundary — on any other thread. That is not bureaucracy: the renderer may be
+    /// walking exactly the child list this assignment edits, and the scene is the only thing that also knows
+    /// whether this node is still one of its <see cref="SceneGraph.Roots"/> (a root that gains a parent stops being
+    /// a root; staying in both places would draw, pick and measure it twice). A node builds its subtree before it
+    /// joins a scene, so assembling one on any thread stays immediate, exactly as before.
+    /// </para>
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// The new parent is this transform or one of its descendants. That would close the tree into a loop, and every
+    /// walk of it — world matrices, rendering, picking, updates — would never terminate.
+    /// </exception>
     public Transform? Parent
     {
         get => _parent;
-        set
+        set => Relink(value, routeThroughScene: true);
+    }
+
+    /// <summary>
+    /// Relinks without consulting the scene. Library-internal: a scene applying an attach it already owns (or
+    /// detaching a node it is removing) must not ask itself to apply the same change again.
+    /// </summary>
+    internal void SetParentDirect(Transform? value) => Relink(value, routeThroughScene: false);
+
+    private void Relink(Transform? value, bool routeThroughScene)
+    {
+        if (value is not null && IsInSubtreeOf(value))
+            throw new ArgumentException(
+                $"Transform '{Owner?.Name}' cannot be parented to '{value.Owner?.Name}': that would make the scene graph a cycle.",
+                nameof(value));
+
+        // Either side can be the one that is in a scene: re-parenting a scene node, or attaching a fresh node
+        // under one (which puts the fresh node's subtree into the scene as well).
+        if (routeThroughScene && (FindScene() ?? value?.FindScene()) is { } scene)
         {
-            _parent?.Children.Remove(this);
-            _parent = value;
-            _parent?.Children.Add(this);
+            scene.ApplyParentChange(this, value);
+            return;
         }
+
+        _parent?._children.Remove(this);
+        _parent = value;
+        _parent?._children.Add(this);
+    }
+
+    /// <summary>
+    /// The scene this transform belongs to, or null when it is outside every scene. Only a scene's root nodes carry
+    /// the registration (<see cref="GameObject.RegisteredScene"/>), so this walks up to the root: any descendant of
+    /// a registered node belongs to the same scene, and a subtree is part of that scene the moment it is attached
+    /// to it (no per-node bookkeeping to keep in sync).
+    /// </summary>
+    internal SceneGraph? FindScene()
+    {
+        for (Transform? node = this; node is not null; node = node._parent)
+        {
+            if (node.Owner.RegisteredScene is { } scene)
+                return scene;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="candidate"/> is this transform or a descendant of it — i.e. whether making it the
+    /// parent would close a cycle. Walks up from the candidate, since the child lists only point one way.
+    /// </summary>
+    internal bool IsInSubtreeOf(Transform candidate)
+    {
+        for (Transform? node = candidate; node is not null; node = node._parent)
+        {
+            if (ReferenceEquals(node, this))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Creates the transform of <paramref name="owner"/> (identity pose, no parent).</summary>
