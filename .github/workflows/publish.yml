@@ -165,5 +165,8 @@ jobs:
             gh release create "$tag" --title "RobotSimulation $version" --verify-tag "${args[@]}"
           fi
 
-          gh release view "$tag" --json name,tagName,isDraft,isLatest,url \
-            | jq -r '"\(.name)  \(.tagName)  draft=\(.isDraft)  latest=\(.isLatest)  \(.url)"'
+          # 收尾只打印一行摘要。字段名要挑 gh 稳定支持的：新版 gh 已经移除了 isLatest，
+          # 写回去会让这一步（以及整个 job，这里 set -e）失败——可用字段列表见
+          # `gh release view --help`，或从报错的 "Available fields" 里抄。
+          gh release view "$tag" --json name,tagName,isDraft,isPrerelease,url \
+            | jq -r '"\(.name)  \(.tagName)  draft=\(.isDraft)  prerelease=\(.isPrerelease)  \(.url)"'
