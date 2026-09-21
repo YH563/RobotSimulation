@@ -25,7 +25,7 @@ file, and this index follows the same rule — this page is the English half, it
 4. [`opengl/en.md`](opengl/en.md) — the only render backend, host composition and **custom shaders**.
 5. [`testing/en.md`](testing/en.md) — the two minimal host tests (bare window / Avalonia) and their test
    data: what they load, where the files come from, how to switch models or regenerate samples; plus the
-   unit-level path-resolution checks in `src/RobotSimulation.Tests`.
+   scene-threading headless checks and the bare-window visual check in `Tests/`.
 
 > Repo entry points: [`../README.md`](../README.md) (English) and [`../README.zh-CN.md`](../README.zh-CN.md) (中文).
 

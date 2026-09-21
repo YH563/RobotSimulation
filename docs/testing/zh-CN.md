@@ -163,20 +163,26 @@ FPS 行里的数字本就是每次测量的结果，所以脚本把它归一化�
 
 ---
 
-## 8. 单元级检查（`src/RobotSimulation.Tests`）
+## 8. 无头检查与目视检查（`Tests/`）
 
-两个宿主证明的是「渲染链路能跑起来」，证明不了「路径解析在边界上是对的」。这一层由 `src/RobotSimulation.Tests` 用 xunit 补上——它只引用 `Core` + `Robot`，不碰 GL：
+两个宿主证明的是「渲染链路能跑起来」。`Tests/RobotSimulation.Tests.csproj`（xunit，引用 `Core` + `Robot` + `OpenGL`）里放两类补充检查：
 
 | 类 | 覆盖 |
 | --- | --- |
-| `AssetResolverTests` | `FileSystemAssetResolver` 的根链顺序（`AssetDirectory` 先于 URDF 自身目录及其回退）、`package://` 包名前缀剥离、绝对路径直通、重复根去重，以及**未命中必须抛异常并列出所有尝试过的路径** |
-| `RobotModelAssetResolutionTests` | 端到端 `RobotModel.ParseFile`：默认扁平布局（包名与目录名不一致）、五种 mesh 格式样例、tutorial 视觉样例；标准 ROS 布局在**不给** `assetDirectory` 时正确失败、给了就成功；`resolver` 与 `assetDirectory` 同时给出必须被拒绝 |
+| `SceneGraphThreadingTests` | 场景的线程契约（10 项无头检查）：属主只声明一次、非属主线程调用帧边界抛异常、跨线程 `Add` / `Remove` 与 `Transform.Parent` 入队并在帧边界提交、队列上限与丢弃计数、根节点随父节点迁出 `Roots` |
+| `BareWindowTests` | 宿主窗口的目视 / 手工检查：真开一个 GL 窗口、跑主循环并放两个盒子进去，窗口关闭才返回（需要显示设备，CI 不跑） |
 
 ```bash
-dotnet test src/RobotSimulation.Tests
+# 无头检查（CI 跑的就是这一条）
+dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName!~BareWindowTests"
+
+# 目视检查：会弹出窗口，关掉窗口才结束
+dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName~BareWindowTests"
 ```
 
-数据**不**拷到输出目录：测试从仓库检出位置**原地**读取两棵资源树——宿主的 `src/BareWindowTest/Assets`（仓库的规范测试数据，Avalonia 宿主那份是逐字节副本），以及本工程自带的 `Assets/RosWorkspace/my_pkg/`（标准 ROS 包布局，仓库里唯一的这种样例，也正是 `assetDirectory` 存在的理由）。测试因此只在仓库检出内运行，`TestAssets.cs` 找不到 `RobotSimulation.sln` 会直接报错。
+这两类检查都不需要资源文件：`SceneGraphThreadingTests` 只是对象图，`BareWindowTests` 只用几何图元（`Box`）搭场景，所以这个工程里既没有 `Assets` 目录，也没有把宿主的测试数据拷到输出目录的步骤。
+
+早先那 37 项用例（`AssetResolverTests` / `RobotModelAssetResolutionTests` / `PickingTests` / `DefaultSceneTests` 与 `TestAssets` 夹具）随旧 `src/RobotSimulation.Tests/` 目录一并删除。其中「点击落在哪个 link 上」由 Avalonia 宿主的 `--smoke` 自检（见上文）覆盖；URDF 解析、`IAssetResolver` 的路径解析、几何图元与射线拾取的边界行为目前没有自动化检查，改动这些地方时请手动跑两个宿主。
 
 mesh 导入**不需要任何运行时初始化**：Assimp 的原生库随 `Silk.NET.Assimp` 包按 RID 分发，宿主什么都不必准备（早先 `AssimpNet` 时代那个 Linux `libdl.so` 兼容补丁已随依赖一起删除），因此本工程里没有任何模块初始化代码。
 

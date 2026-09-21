@@ -15,8 +15,8 @@
 | **`RobotSimulation.OpenGL`** | 唯一渲染后端：Silk.NET OpenGL + StbImageSharp 的网格 / 材质 / 纹理 / **着色器**与渲染器（`Device`、`Rendering`、`Resources`）。 | `Core` |
 | *(test) `BareWindowTest`* | 裸窗口宿主测试：极简 Silk.NET 窗口，**不含任何 UI 框架**；同时充当自动化冒烟测试（`--smoke [frames]` → 退出码 0/1）。**不发布**。 | `Core`, `Robot`, `OpenGL` |
 | *(test) `AvaloniaTest`* | Avalonia 宿主测试：把本库嵌入 `RobotViewportControl`（派生自 `Avalonia.OpenGL.Controls.OpenGlControlBase`），并把 GPU / 帧率 / 冒烟信息按**与裸窗口宿主完全相同的措辞**打印到控制台。**不发布**。 | `Core`, `Robot`, `OpenGL`, `Avalonia` |
-| *(test) `RobotSimulation.Tests`* | xunit 单元级检查（面向已发布面）：`FileSystemAssetResolver` 的路径解析（根顺序、`package://` 处理、未命中时硬失败）与端到端 URDF → `RobotModel` 加载，含只有 `assetDirectory` 才能加载的标准 ROS 布局。**不发布**。 | `Core`, `Robot` |
-| *(data) `BareWindowTest/Assets`、`AvaloniaTest/Assets`* | 各宿主测试自己的测试数据：每个工程一个 `Assets/` 目录，由该工程的 `.csproj` 拷到自己的可执行文件旁。宿主只加载**写在自己源码里的那一个 URDF**（`Models/fairino3_v6/`）；目录里另备了可直接换用的样例（`Models/primitives.urdf`、`Models/urdf_tutorial/`、`Models/formats/`、`PointClouds/`）。无路径参数、无共享目录、无路径表。`RobotSimulation.Tests` 就地从这两棵树读取，并自带一份 ROS 工作区样例。 | — |
+| *(test) `RobotSimulation.Tests`* | xunit 检查（`Tests/`）：`SceneGraphThreadingTests` 覆盖场景的线程契约（属主只声明一次、跨线程 `Add` / `Remove` 与 `Transform.Parent` 入队并在帧边界提交、队列上限与丢弃计数），另有真开窗口的目视检查 `BareWindowTests`。**不发布**。 | `Core`, `Robot`, `OpenGL` |
+| *(data) `BareWindowTest/Assets`、`AvaloniaTest/Assets`* | 各宿主测试自己的测试数据：每个工程一个 `Assets/` 目录，由该工程的 `.csproj` 拷到自己的可执行文件旁。宿主只加载**写在自己源码里的那一个 URDF**（`Models/fairino3_v6/`）；目录里另备了可直接换用的样例（`Models/primitives.urdf`、`Models/urdf_tutorial/`、`Models/formats/`、`PointClouds/`）。无路径参数、无共享目录、无路径表。 | — |
 
 > 打包：三个库分别打包为 `RobotSimulation.Core` / `.Robot` / `.OpenGL`。`PackageId`、`Version`、`Authors`、`RepositoryUrl`、`PackageReadmeFile` 与符号包均已配置（`Directory.Build.props` + 各 `.csproj`），且每个包都带上生成的 XML 文档文件供 IntelliSense 使用——`dotnet pack RobotSimulation.sln` 产出三个 `.nupkg` + `.snupkg`。**许可**也已确定：MIT——在 `Directory.Build.props` 中以 SPDX 表达式 `MIT` 声明，仓库根另有配套的 `LICENSE`，且每个包都会随包携带一份，因此 `dotnet pack` 的产物自带许可声明。
 
@@ -174,7 +174,7 @@ dotnet run --project src/AvaloniaTest
 - [x] 打包元数据（`PackageId` / 版本 / NuGet 元数据 / README / 许可）：由 `Directory.Build.props` 加各 `.csproj` 承担，已用 `dotnet pack` 验证——产出 3 个 `.nupkg` + 3 个 `.snupkg`，每个包都带 XML 文档、README 与一份 `LICENSE`。推送至源仍是单独的手动步骤。
 - [ ] `Visualization` 显示层（rviz-like Display）与外部写入协议（Sink）。
 - [ ] 三个宿主示例 / 测试项目：裸窗口、WPF、Avalonia——各一个 `RobotViewport` 式控件，既证明本库**可独立渲染显示**，也作为收编相关测试的载体。**已完成**：裸窗口（`src/BareWindowTest`）✔、Avalonia（`src/AvaloniaTest`）✔；WPF 待做。
-- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。**进行中**：`src/RobotSimulation.Tests`（xunit，**37 项检查**，四个文件）已覆盖 URDF 解析与 `IAssetResolver` 路径解析的端到端行为（含只有 `assetDirectory` 才能加载的标准 ROS 布局）✔、几何图元与射线拾取（表面点往返、窗口越大点击漂移越大、合成器视口与布局预测不一致）✔，以及默认 `SceneGraph` 与其选择契约 ✔；`RobotState` FK 待做。
+- [ ] 单元测试：几何图元、射线拾取、URDF 解析、`RobotState` FK。**进行中**：`Tests/`（xunit）现有 `SceneGraphThreadingTests`——场景线程契约的 **10 项**无头检查（属主只声明一次、跨线程 `Add` / `Remove` 与 `Transform.Parent` 入队并在帧边界提交、队列上限与丢弃计数、根节点随父节点迁出 `Roots`）✔，以及 `BareWindowTests` 这个真开窗口的目视 / 手工检查 ✔。早先那 37 项用例（URDF 解析与 `IAssetResolver` 路径解析、几何图元、射线拾取、默认 `SceneGraph` 的选择契约）随旧 `src/RobotSimulation.Tests/` 目录一并删除，其中「点击落在哪个 link 上」目前由 Avalonia 宿主的 `--smoke` 自检覆盖；形状 / 拾取 / 路径解析与 `RobotState` FK 待补。
 - [ ]（可选）额外的非 Silk 渲染后端。
 
 ---
