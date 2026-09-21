@@ -89,20 +89,51 @@ jobs:
             echo "::error::NuGet/login 未返回临时 key，请核对本步骤的 id/outputs 名称与 nuget.org 上的 Trusted Publishing 策略。"
             exit 1
           fi
-          # 依赖先行：Core -> Robot -> OpenGL；.snupkg 用同一把临时 key 推，nuget.org 会自动挂上符号。
+          # 依赖先行：Core -> Robot -> OpenGL。分两轮推：第一轮只推三个 .nupkg，第二轮再推 .snupkg，
+          # 中间等一下。原因是 nuget.org 对符号包是「异步校验」——Validation.Orchestrator 的
+          # SymbolsValidator 拿到符号包后，会拿已经入库的 .nupkg 内容去核对 pdb 对应的 dll；
+          # 紧跟 .nupkg 上传的那一次符号上传可能撞上「包还没就绪」，被记成
+          # "pdb(s) for a corresponding dll(s) not found in the nuget package" 并挂在包页面的
+          # 告警里（只有包主能看到），而 .nupkg 自己的落库 / 索引要几分钟（v0.3.0 那次：09:33 上传，
+          # 符号 09:38~09:40 才在 nuget.org 上可下载）。等一下 + 失败重试能避开这个窗口。
           #
-          # 每个包先推 .nupkg 再推 .snupkg。别写成 "RobotSimulation.$p.*.nupkg"：那个 glob 连
-          # .snupkg 也匹配（snupkg 以 nupkg 结尾），符号包会被推两遍——第二遍只能靠
-          # --skip-duplicate 变成 Conflict 收场，日志里看着像失败。所以先用 bash 把两类文件分开。
+          # 两处细节别省：
+          #   1) 别写成 "RobotSimulation.$p.*.nupkg"：那个 glob 连 .snupkg 也匹配（snupkg 以 nupkg
+          #      结尾），所以第一个循环里要用 case 把它们挑出去。
+          #   2) 第一个循环必须带 --no-symbols：dotnet nuget push 默认还会「顺手」把与 .nupkg 同目录
+          #      同名的 .snupkg 一起推（NuGet.Protocol 的 PackageUpdateResource.GetSymbolsPath），
+          #      --no-symbols 才是「只推 .nupkg」。否则符号包还是会被推两遍，第二遍只能靠
+          #      --skip-duplicate 变成 Conflict 收场，日志里看着像失败。
           for p in Core Robot OpenGL; do
             for f in artifacts/RobotSimulation."$p".*.nupkg; do
               case "$f" in *.snupkg) continue ;; esac
               dotnet nuget push "$f" \
-                --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+                --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json \
+                --skip-duplicate --no-symbols
             done
+          done
+
+          # 给 nuget.org 一点时间把刚推上去的 .nupkg 落库，再推符号包；符号包的首次校验若正好撞上
+          # 上面的窗口会被拒，所以同一个文件失败就退避重试几次（--skip-duplicate 下 409 = 已经有
+          # 符号包了，算成功，不会进到这里）。
+          sleep 30
+
+          for p in Core Robot OpenGL; do
             for f in artifacts/RobotSimulation."$p".*.snupkg; do
-              dotnet nuget push "$f" \
-                --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+              pushed=""
+              for attempt in 1 2 3; do
+                if dotnet nuget push "$f" \
+                     --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate; then
+                  pushed=1
+                  break
+                fi
+                echo "::warning::$f 第 $attempt 次推送被拒，30 秒后重试（nuget.org 的符号校验要能看到对应的 .nupkg）。"
+                sleep 30
+              done
+              if [ -z "$pushed" ]; then
+                echo "::error::$f 重试 3 次仍失败，这个包的符号包没有发布。"
+                exit 1
+              fi
             done
           done
 
