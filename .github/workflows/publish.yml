@@ -56,9 +56,13 @@ jobs:
       - name: Build
         run: dotnet build RobotSimulation.sln -c Release --no-restore
 
-      # 测试夹具（URDF / 各格式网格）随仓库提交，测试是纯 headless 的（只依赖 Core + Robot），无需图形环境。
+      # 测试工程在 Tests/（旧位置 src/RobotSimulation.Tests/ 已废弃，sln 与本步骤同步）。
+      #
+      # BareWindowTests 用 Silk.NET 真开一个 GL 窗口并跑主循环（窗口关闭才返回），是本地目视 / 手工检查用的；
+      # CI runner 没有显示设备，直接跑会失败或永不返回，所以这里按类名过滤，只跑无头用例。本地想看那个窗口：
+      #   dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter FullyQualifiedName~BareWindowTests
       - name: Test
-        run: dotnet test src/RobotSimulation.Tests/RobotSimulation.Tests.csproj -c Release --no-build
+        run: dotnet test Tests/RobotSimulation.Tests.csproj -c Release --no-build --filter "FullyQualifiedName!~BareWindowTests"
 
       - name: Pack
         run: |
