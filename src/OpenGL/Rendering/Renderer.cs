@@ -5,6 +5,7 @@ using System.Numerics;
 using RobotSimulation.Core.Geometry;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Scene;
+using RobotSimulation.Core.Utils;
 using RobotSimulation.OpenGL.Device;
 using RobotSimulation.OpenGL.Resources;
 using Silk.NET.OpenGL;
@@ -39,14 +40,29 @@ public sealed class Renderer : IRenderer
 
     /// <summary>
     /// Edge length of the orientation gizmo's orthographic view, in world units. The arrows are 1 unit long, so a
-    /// width of 2.2 makes the marker fill its square (≈72 px per axis at the 160 px default) with just enough room
-    /// left for the arrow heads — the widget draws nothing else around them, so the square viewport is all the
-    /// margin it needs.
+    /// width of 2.2 makes the marker fill its square with just enough room left for the arrow heads — the widget
+    /// draws nothing else around them, so the square viewport is all the margin it needs. One axis therefore spans
+    /// (square size / 2.2) pixels, and both the arrows and the hub scale with that square (see
+    /// <see cref="GizmoSizeRatio"/>).
     /// </summary>
     private const float GizmoViewWidth = 2.2f;
 
-    /// <summary>Radius of the hub ball at the gizmo's origin, in the gizmo's own units (≈7 px at the default size).</summary>
+    /// <summary>Radius of the hub ball at the gizmo's origin, in the gizmo's own units (a fraction of the square).</summary>
     private const float GizmoHubRadius = 0.10f;
+
+    /// <summary>
+    /// Fraction of the viewport's shorter side that the orientation gizmo's square fills. The marker is sized
+    /// relative to the window instead of being pinned to an absolute pixel count, so it keeps the same visual weight
+    /// in a small viewport and a large one — a fixed square reads as huge in a thumbnail and disappears in a
+    /// maximised window. This is the one knob to turn when tuning how large the widget feels.
+    /// </summary>
+    private const float GizmoSizeRatio = 0.12f;
+
+    /// <summary>Lower bound (pixels) of the gizmo square: below this the arrows stop being legible.</summary>
+    private const float GizmoMinSize = 64f;
+
+    /// <summary>Upper bound (pixels) of the gizmo square: past this the marker starts covering the picture it annotates.</summary>
+    private const float GizmoMaxSize = 240f;
 
     private readonly GL _gl;
     private readonly GraphicsContext _device;
@@ -73,6 +89,14 @@ public sealed class Renderer : IRenderer
     private readonly Dictionary<MaterialData, Cached<Material>> _materialCache = new();
     private long _lastSweepFrame;
     private bool _disposed;
+
+    /// <summary>
+    /// Whether the "more visible lights than a pass can shade" warning has already been logged for the
+    /// current overflow. A scene edited at runtime can cross <see cref="MaxLights"/> at any time, and the
+    /// picture would then just lack that light — so the cap is reported once instead of being silent, and
+    /// re-armed when the scene fits again.
+    /// </summary>
+    private bool _lightOverflowWarned;
 
     private readonly Stopwatch _frameClock = new();
     private double _smoothedFrameMs;
@@ -150,13 +174,22 @@ public sealed class Renderer : IRenderer
             _frameCount);
     }
 
-    /// <summary>Draws the entire scene.</summary>
+    /// <summary>
+    /// Draws the entire scene. Call it on the render thread: it is the scene's frame boundary, so the
+    /// structural changes other threads queued (<see cref="SceneGraph.Add"/> / <see cref="SceneGraph.Remove"/>,
+    /// and re-parents) are applied here, before anything is walked — a host can keep building the scene from a
+    /// worker thread and still see the objects appear, at the latest, in the frame after they were requested.
+    /// The render thread has to be the scene's owner thread: while it renders a scene constructed elsewhere,
+    /// that host hands the scene over with <see cref="SceneGraph.ClaimOwnership"/> before its loop starts.
+    /// </summary>
     public void Render(SceneGraph scene)
     {
         if (scene is null)
             throw new ArgumentNullException(nameof(scene));
         if (_disposed)
             throw new ObjectDisposedException(nameof(Renderer));
+
+        scene.ApplyPendingChanges();
 
         UpdateStats();
         SweepUnusedCaches();
@@ -171,17 +204,34 @@ public sealed class Renderer : IRenderer
         var types = new int[MaxLights];
         var intensities = new float[MaxLights];
         int lightCount = 0;
+        int droppedLights = 0;
 
         foreach (Light light in scene.Lights)
         {
-            if (lightCount >= MaxLights) break;
+            // An invisible light is off, the same way an invisible object is not drawn: the flag means "this node
+            // takes no part in the picture", and a light's part in the picture is the shading it contributes.
+            if (!light.Visible)
+                continue;
+
+            // The shader's uniform array is MaxLights wide, so a scene that grew past the cap (objects can be
+            // added while it renders) draws without these. Counted, not just skipped, so the drop is reported.
+            if (lightCount >= MaxLights)
+            {
+                droppedLights++;
+                continue;
+            }
+
             colors[lightCount] = light.Color;
-            positions[lightCount] = light.Position;
-            directions[lightCount] = light.Direction;
+            // World-space values: the shader shades in world space and a light may be parented (a lamp on a robot),
+            // so the local position/direction would light the model from the wrong place.
+            positions[lightCount] = light.WorldPosition;
+            directions[lightCount] = light.WorldDirection;
             types[lightCount] = light.Type == LightType.Directional ? 1 : 0;
             intensities[lightCount] = light.Intensity;
             lightCount++;
         }
+
+        ReportDroppedLights(droppedLights);
 
         ApplyLightUniforms(colors, positions, directions, types, intensities, lightCount);
 
@@ -213,12 +263,42 @@ public sealed class Renderer : IRenderer
         _modelShader.SetUniform("uLightIntensities", intensities);
     }
 
+    /// <summary>
+    /// Reports lights that did not fit into the pass. The cap is a shader limit, not a scene rule, so a scene
+    /// may legitimately hold more lights than one pass shades — a runtime-edited one will, since objects can be
+    /// added while it renders. The picture would then simply lack that light, which is exactly the kind of
+    /// silence that costs an afternoon, so it is said once per overflow episode (silent again once the scene
+    /// fits, so the next overflow is news again).
+    /// </summary>
+    private void ReportDroppedLights(int dropped)
+    {
+        if (dropped == 0)
+        {
+            _lightOverflowWarned = false;
+            return;
+        }
+
+        if (_lightOverflowWarned)
+            return;
+
+        _lightOverflowWarned = true;
+        Logger.Warning($"The scene holds more visible lights than one pass can shade ({MaxLights}, MAX_LIGHTS in " +
+                       $"Standard.frag): {dropped} light(s) were dropped. Turn the extras off (Visible = false) " +
+                       "or remove them — a light past the cap changes nothing on screen.");
+    }
+
     private void RenderNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
     {
-        // Visible nodes carrying data: dispatch by render pass.
-        // Pure skeleton/hierarchy nodes (no data) only act as parents for recursion and do not block the
-        // subtree (common for URDF links).
-        if (node.Visible && node.MaterialData != null)
+        // Invisible means the whole subtree is off, not just this node's own draw: hiding a parent is how a host
+        // turns a group off in one write (a collision set, a whole model), and a child that stayed on screen inside
+        // a hidden parent would be exactly what the flag fails to do. So the check belongs before the recursion —
+        // which is what GameObject.Visible promises ("this node and its subtrees").
+        if (!node.Visible)
+            return;
+
+        // Nodes carrying data draw per render pass. Pure skeleton/hierarchy nodes (no data) only act as parents for
+        // recursion and do not block the subtree (common for URDF links).
+        if (node.MaterialData != null)
         {
             switch (node.MaterialData.PassKind)
             {
@@ -320,8 +400,8 @@ public sealed class Renderer : IRenderer
     /// pinned to the viewport's bottom-right corner and following the camera's orientation (see
     /// <see cref="SceneGraph.ShowOrientationGizmo"/>). It is the screen-space counterpart of a scene axes set: it is
     /// drawn after the scene, into its own viewport, with the depth buffer cleared inside that square, so it is
-    /// never occluded by geometry, keeps a constant pixel size at any zoom, and, being no scene node, can never be
-    /// picked.
+    /// never occluded by geometry, keeps its pixel size independent of the camera (the square is sized from the
+    /// viewport's shorter side — see <see cref="GizmoSizeRatio"/>), and, being no scene node, can never be picked.
     /// </summary>
     private void DrawOrientationGizmo(SceneGraph scene)
     {
@@ -329,8 +409,12 @@ public sealed class Renderer : IRenderer
         if (surfaceWidth <= 0 || surfaceHeight <= 0)
             return;   // The host has not sized a viewport yet: there is nothing to anchor the gizmo to.
 
-        int size = (int)MathF.Round(Math.Clamp(scene.OrientationGizmoSize, 16f,
-            MathF.Max(16f, Math.Min(surfaceWidth, surfaceHeight))));
+        // Relative size: the square follows the viewport's shorter side, so the widget keeps the same visual weight
+        // in a small window and a large one; the bounds keep it legible at one end and unobtrusive at the other, and
+        // it can never be wider than the viewport it is pinned to.
+        float shorterSide = MathF.Min(surfaceWidth, surfaceHeight);
+        float requested = Math.Clamp(shorterSide * GizmoSizeRatio, GizmoMinSize, GizmoMaxSize);
+        int size = (int)MathF.Round(Math.Clamp(requested, 16f, MathF.Max(16f, shorterSide)));
         int margin = (int)MathF.Round(MathF.Max(0f, scene.OrientationGizmoMargin));
         int left = Math.Max(0, surfaceWidth - size - margin);
         int bottom = Math.Max(0, margin);   // GL's origin is the bottom-left corner, so this is the bottom-right one.

@@ -34,8 +34,31 @@ public class Light : GameObject
     /// <summary>Directional light's lighting direction (world coordinates, pointing along the light); ignored for point lights.</summary>
     public Vector3 Direction { get; set; } = -Vector3.UnitZ;
 
-    /// <summary>Point light world position (i.e. Transform position).</summary>
+    /// <summary>
+    /// Point light position in its parent's space — for the usual scene-root light this is the world position,
+    /// as with any other node's <see cref="Transform.Position"/>.
+    /// </summary>
     public Vector3 Position => Transform.Position;
+
+    /// <summary>
+    /// Point light world position: <see cref="Position"/> composed with every ancestor transform, so a light
+    /// parented to something (a lamp mounted on a robot) lights from where it really is instead of from a local
+    /// offset. This is what the renderer feeds to the shader.
+    /// </summary>
+    public Vector3 WorldPosition => Transform.GetModelMatrix().Translation;
+
+    /// <summary>
+    /// Directional light world direction: <see cref="Direction"/> carried through the transform chain and
+    /// re-normalized (a scaled parent must not stretch it). This is what the renderer feeds to the shader.
+    /// </summary>
+    public Vector3 WorldDirection
+    {
+        get
+        {
+            Vector3 world = Vector3.TransformNormal(Direction, Transform.GetModelMatrix());
+            return world.LengthSquared() > 0f ? Vector3.Normalize(world) : Direction;
+        }
+    }
 
     /// <summary>Creates a light with the default appearance (white, intensity 1, point type).</summary>
     /// <param name="name">Scene object name (defaults to <c>Light</c>).</param>

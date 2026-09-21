@@ -211,6 +211,15 @@ public class RobotViewportControl : OpenGlControlBase
         if (_gl is null || _graphics is null || _renderer is null || _scene is null)
             return; // Initialization failed (already reported) — there is nothing to draw.
 
+        // The scene belongs to the thread that constructed it (OnOpenGlInit above) and is driven here. Both are
+        // Avalonia's GL-control thread, so this is normally a no-op — but which thread a GL control initialises and
+        // renders on is the framework's business, not this host's contract with the library, and declaring the
+        // render thread as the owner is exactly the host's job. Doing it before the first frame boundary keeps a
+        // different framework choice from turning into "the boundary runs on a thread that does not own the scene".
+        // On the owner thread it does nothing.
+        if (!_scene.IsOwnerThread)
+            _scene.ClaimOwnership();
+
         // Avalonia renders this control into its own framebuffer; drawing into the default one (0)
         // would never reach the screen. The library never binds a framebuffer, so the host stays in
         // charge of the render target — which is exactly what makes it embeddable.
