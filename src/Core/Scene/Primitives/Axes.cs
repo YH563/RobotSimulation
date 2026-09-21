@@ -60,6 +60,22 @@ public sealed class Axes : GameObject
     /// </summary>
     public AxesSizing Sizing { get; set; } = AxesSizing.ConstantScreenSize;
 
+    /// <summary>
+    /// Whether the set is an annotation no geometry may hide: the renderer leaves such a set (and its whole
+    /// subtree) out of the ordinary, depth-tested walk, clears the depth buffer once the scene is drawn, and only
+    /// then draws it — so a marker that sits <em>inside</em> the mesh it annotates stays readable instead of being
+    /// half buried in it. The on-top sets are still depth-tested against each other, so a nearer marker correctly
+    /// wins where two overlap.
+    /// <para>
+    /// Default false, deliberately: a <see cref="AxesSizing.FixedWorldLength"/> set is a ruler, and a ruler that
+    /// shows through the model it measures lies about the scene. The per-object frame marker
+    /// (<see cref="GameObject.ShowLocalAxes"/>, which is also what <see cref="SceneGraph.Select"/> mounts on a
+    /// pick) turns it on when it creates its set — set it back to false on <see cref="GameObject.LocalAxes"/> to
+    /// get an ordinary, occludable set.
+    /// </para>
+    /// </summary>
+    public bool AlwaysOnTop { get; set; }
+
     // ---- Constant screen size parameters (managed internally by the axes; the Renderer only reads) ----
 
     /// <summary>Constant screen size factor: target world length = <see cref="ScreenScale"/> × camera-to-origin distance.</summary>

@@ -87,6 +87,15 @@ public sealed class Renderer : IRenderer
     private readonly Dictionary<LineData, Cached<LineMesh>> _lineCache = new();
     private readonly Dictionary<PointCloud2Data, Cached<PointMesh>> _pointCache = new();
     private readonly Dictionary<MaterialData, Cached<Material>> _materialCache = new();
+
+    /// <summary>
+    /// The always-on-top axes sets met during the current frame's walk, in the order they were found. The ordinary
+    /// pass queues them instead of drawing them, and <see cref="DrawOverlayAxes"/> draws them once the scene is
+    /// down; the list is reused every frame, so splitting the picture in two costs a clear instead of an
+    /// allocation.
+    /// </summary>
+    private readonly List<Axes> _overlayAxes = new();
+
     private long _lastSweepFrame;
     private bool _disposed;
 
@@ -235,8 +244,15 @@ public sealed class Renderer : IRenderer
 
         ApplyLightUniforms(colors, positions, directions, types, intensities, lightCount);
 
+        // The scene's own walk: every node is drawn here, depth-tested, except the axes sets that asked to be on
+        // top — those are queued for the overlay pass below, one frame after another re-using the same list.
+        _overlayAxes.Clear();
         foreach (GameObject root in scene.Roots)
             RenderNode(root, scene, view, projection);
+
+        // Then the on-top annotations, and only then the corner gizmo: the order is the stack the host sees, and
+        // the gizmo goes last so its own square is the topmost thing in the corner.
+        DrawOverlayAxes(scene, view, projection);
 
         // Last, so it lands on top of the finished picture rather than inside it (see the method for how its
         // own viewport and depth clear are confined to the corner square).
@@ -287,7 +303,21 @@ public sealed class Renderer : IRenderer
                        "or remove them — a light past the cap changes nothing on screen.");
     }
 
-    private void RenderNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
+    /// <summary>
+    /// Walks one node of the scene (and its subtree) and draws it. <paramref name="overlay"/> selects which of the
+    /// frame's two passes this is: the ordinary one (false) draws everything depth-tested, but hands an
+    /// <see cref="Axes.AlwaysOnTop"/> set to the overlay pass instead of drawing it; the overlay pass (true) is
+    /// then run over those sets' subtrees, on the cleared depth buffer described in
+    /// <see cref="DrawOverlayAxes"/>. One flag, one traversal: a node is drawn exactly once however its set is
+    /// configured, and the overlay pass never queues a nested set into the list it is iterating.
+    /// </summary>
+    /// <param name="node">The node to draw and recurse into.</param>
+    /// <param name="scene">The scene being drawn (camera/ambient for the lit passes).</param>
+    /// <param name="view">Camera view matrix for this frame.</param>
+    /// <param name="projection">Camera projection matrix for this frame.</param>
+    /// <param name="overlay">Whether this is the on-top pass (see the summary).</param>
+    private void RenderNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection,
+        bool overlay = false)
     {
         // Invisible means the whole subtree is off, not just this node's own draw: hiding a parent is how a host
         // turns a group off in one write (a collision set, a whole model), and a child that stayed on screen inside
@@ -295,6 +325,15 @@ public sealed class Renderer : IRenderer
         // which is what GameObject.Visible promises ("this node and its subtrees").
         if (!node.Visible)
             return;
+
+        // A set that asked to be on top is a marker, not part of the picture's geometry: the ordinary walk queues
+        // its whole subtree and moves on, and the overlay pass draws it once the scene is down. Queueing before the
+        // pass switch is also what keeps the check to one place — no pass has to know about the depth policy.
+        if (!overlay && node is Axes { AlwaysOnTop: true } marker)
+        {
+            _overlayAxes.Add(marker);
+            return;
+        }
 
         // Nodes carrying data draw per render pass. Pure skeleton/hierarchy nodes (no data) only act as parents for
         // recursion and do not block the subtree (common for URDF links).
@@ -326,7 +365,7 @@ public sealed class Renderer : IRenderer
         }
 
         foreach (Transform child in node.Transform.Children)
-            RenderNode(child.Owner, scene, view, projection);
+            RenderNode(child.Owner, scene, view, projection, overlay);
     }
 
     /// <summary>
@@ -393,6 +432,38 @@ public sealed class Renderer : IRenderer
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
 
         GetOrCreateMesh(node.MeshData!).Draw();
+    }
+
+    /// <summary>
+    /// Draws the axes sets that asked to be on top (<see cref="Axes.AlwaysOnTop"/>): the frame markers a per-object
+    /// coordinate frame needs. A marker sits <em>inside</em> the mesh it annotates, so under the ordinary depth test
+    /// it is half buried in that mesh — precisely the geometry it exists to explain. Clearing the depth buffer once
+    /// the scene is done turns the pass into an overlay: nothing that was drawn before it can hide a marker, while
+    /// the markers still occlude each other correctly (they are drawn against the same buffer, so the nearer set
+    /// wins where two overlap).
+    /// <para>
+    /// The clear is cheap and safe: the depth buffer is scratch state no host reads back — the host clears it at the
+    /// start of each frame (<c>IRenderContext.Clear</c>) and this is the frame's last use of it, since only the
+    /// corner gizmo follows (which clears its own square for the same reason). Drawn with the depth test on, so a
+    /// marker behaves like ordinary geometry among its peers.
+    /// </para>
+    /// </summary>
+    private void DrawOverlayAxes(SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
+    {
+        if (_overlayAxes.Count == 0)
+            return;   // The common frame: no set asked to be on top, so the depth buffer is left exactly as it is.
+
+        _gl.Clear(ClearBufferMask.DepthBufferBit);
+
+        // Markers are always solid: ApplyRenderState is per material, so the last model node may have left a
+        // wireframe polygon mode behind, and a wireframe marker is not a legible one (the orientation gizmo
+        // normalises the same way before it draws).
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+
+        foreach (Axes marker in _overlayAxes)
+            RenderNode(marker, scene, view, projection, overlay: true);
+
+        _overlayAxes.Clear();
     }
 
     /// <summary>

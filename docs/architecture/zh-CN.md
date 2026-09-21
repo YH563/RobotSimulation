@@ -135,7 +135,8 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-021 | URDF 资产查找改为「根回退链」：显式 `assetDirectory`（优先）→ URDF 同级目录（默认）；`package://` 的**包名一律丢弃** | 用显式资源根取代启发式猜测（`assetDirectory` ＝ MuJoCo `meshdir`）；标准 ROS 的 `urdf/`+`meshes/` 布局无需改 URDF 即可加载 |
 | ADR-022 | 点云增量更新：数据层「可增长缓冲 + 环形起点 + 修订号/变更窗口」，后端拉取式局部上传（`PointMesh.Sync`），并按帧戳回收 GPU 资源缓存 | 追加不搬数据、驱逐只移动环形起点 → 每帧只上传新增的几个点；`Revision` 未变则一个字节也不传 |
 | ADR-023 | 朝向反馈按性质一分为二：场景里的坐标轴是普通、会被遮挡的「尺子」（`AxesSizing.FixedWorldLength`，`FitWorldAxesToContent` 让它伸出模型之外）；屏幕空间 gizmo 由渲染器画在视口右下角（独占视口 + 限定在 `glScissor` 内的深度清理，永不被遮挡、永不参与拾取）。默认场景不开世界坐标轴、开 gizmo | 「X/Y/Z 朝哪」是 UI 问题，「一米有多长」是场景问题——各自在自己的空间里回答，互不干扰 |
-| ADR-024 | 选择反馈成对出现、由场景装配：`SceneGraph.Select` 既高亮被点中的对象，又在它身上挂该节点自己的局部坐标轴（不可拾取；`ShowSelectionAxes` 默认开）；渲染器的角落 gizmo 则保持「裸标」——三支箭头 + 一个原点小球，不带背景底盘。两者都**只用于显示**：库内不提供任何拖拽手柄，场景也从不回写位姿 | 高亮只说明「选中了什么」，说不出这个节点的坐标系朝哪；世界原点的坐标轴又与被选中的对象无关——两者本属同一次点击。而机器人各 link 的位姿归关节链所有，只「显示」参考系的反馈永远不会与运动学打架 |
+| ADR-024 | 选择反馈成对出现、由场景装配：`SceneGraph.Select` 既高亮被点中的对象，又在它身上挂该节点自己的局部坐标轴（不可拾取；`ShowSelectionAxes` 默认开）；渲染器的角落 gizmo 则保持「裸标」——三支箭头 + 一个原点小球，不带背景底盘。两者都**只用于显示**：库内不提供任何拖拽手柄，场景也从不回写位姿。其中那块标记画在**几何之上**（`Axes.AlwaysOnTop`）：普通遍历里只入队、清一次深度缓冲后再画，所以被标注的那块网格再也埋不掉「它本该解释的坐标系」；而世界尺子保持默认、照旧会被遮挡 | 高亮只说明「选中了什么」，说不出这个节点的坐标系朝哪；世界原点的坐标轴又与被选中的对象无关——两者本属同一次点击。而机器人各 link 的位姿归关节链所有，只「显示」参考系的反馈永远不会与运动学打架 |
+| ADR-026 | 深度策略归**坐标轴系自己**、不是场景级开关：`Axes.AlwaysOnTop`（默认 false）让渲染器在普通遍历里把该轴系**整棵子树**入队，最后在刚清空的深度缓冲上绘制（每帧一次 `glClear(GL_DEPTH_BUFFER_BIT)`，没有任何轴系入队时整步跳过）；角落 gizmo 仍沿用「独占视口 + 限定在 `glScissor` 内的深度清理」。`GameObject.ShowLocalAxes`（因而 `SceneGraph.Select`）创建标记时打开该标志；`FixedWorldLength` 的尺子保持关闭 | 「对象自己的坐标系」正立在被标注的那块网格**内部**，用深度测试就会把它要解释的那个坐标系埋掉；但「标注优先」也不能做成场景级规则——一把能穿透被测物体的尺子，会把场景尺寸说成假的。把开关放在轴系上（与它的尺寸策略同源，ADR-012），选择就留在有知识的那一层：渲染器只读取，两类坐标轴还能在同一场景里共存 |
 | ADR-025 | 场景结构变更改为**帧边界提交**：`SceneGraph.Add` / `Remove` 在属主线程上照旧立即生效，其它线程只入 `ConcurrentQueue`；帧边界 `ApplyPendingChanges()`（`Update` 与每个 `IRenderer.Render` 实现都会先调）统一合入 `Roots` / `Lights`，并发布单调 `Version` 与 `PendingChangeCount`（只覆盖**结构**变更：位姿/关节值等纯数据仍按「发布—交接」用）；`Remove` 顺带清掉指向已离场景节点的选择，`Dispose` 之后的结构变更被忽略（记一次警告）；**写权只声明一次**——构造线程即属主，帧循环在别的线程上时由宿主在开跑前用 `ClaimOwnership()` 显式交接，`ApplyPendingChanges()` 不再「谁调谁是属主」、在非属主线程上直接抛 `InvalidOperationException`（帧边界与「允许遍历 `Roots` 的线程」必须永远是同一个）；`Transform.Parent` 这条后门一并折进同一队列（属主线程上立即生效并同步 `Roots` 成员关系，其它线程入队），`Transform.Children` 变为只读视图；队列加 `MaxPendingChanges` 上限与 `DroppedPendingChangeCount`（超限丢弃 + 记一次警告，让误用可见） | 「一边渲染一边加对象」原本只是**碰巧**能跑（活遍历 + 惰性 GPU 上传），却没有任何契约：跨线程 `Add` 会让渲染遍历抛 `Collection was modified`，删掉选中节点会留下悬空选择，灯光越过着色器上限则静默丢灯。把结构变更收拢到帧边界，等于把「发布—交接」这条并发规则写进代码：生产者只入队、渲染只遍历自洽快照，代价仅是「最迟下一帧可见」——与 Unreal/Godot/Unity 的命令队列、PhysX/Bevy 的双缓冲 Extract、rviz 的 `queueRender()` 是同一套语义。ADR-025 的第二半在实现中补齐：让生产者只入队，只解决了「生产者碰不到列表」，没解决「谁算生产者」——原来的帧边界会把调用线程认作属主，于是一次从别的线程来的、本该入队的调用就翻掉了属主，把上一个属主（可能正在遍历）变成外来者，「谁可以写」于是变成每调用一次一个答案。整帧只能有一个答案：属主在构造时确定、可在开跑前一次性显式交接，越界一律抛异常而不是静默改道。同理，`Transform.Parent` 直接改 `Children` 是同一条规则的后门（它还会让节点同时留在 `Roots` 与父节点下，于是 `Remove` 要调两次才干净），一并折进队列；未声明上限的队列也让「以数据频率入队结构变更」这种误用不可见，所以给了上限与丢弃计数 |
 
 ---
@@ -155,7 +156,9 @@ producers: scene.Add / scene.Remove    update:  scene.Update(dt)
                                                       ├─ 遍历 scene.Roots
                                                       ├─ 按 PassKind 分发 (Model/Line/Point/Axes)
                                                       ├─ 数据→GPU 资源 缓存/创建（Mesh/Material/Texture/Shader）
-                                                      └─ 绘制
+                                                      ├─ 按深度测试绘制（带 `AlwaysOnTop` 的轴系到此只入队、不绘制）
+                                                      ├─ 覆盖层：清一次深度缓冲 → 再画这些轴系（谁也藏不住它们）
+                                                      └─ 角落朝向 gizmo（独占视口 + 限定在 glScissor 内的深度清理）
 ```
 
 - **数据可以任意线程写**：`GameObject` / `Transform` / `MeshData` / `MaterialData` 等为纯数据，可在任意线程构建、随后在渲染前被读取（**结构**不在其列，见下一条）。

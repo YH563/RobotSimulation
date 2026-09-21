@@ -20,9 +20,9 @@ A scene node. It holds only scene data (Transform, CPU model data, CPU material)
 | `LineData` | `LineData?` | Line segment set (with `RenderPassKind.Line`) |
 | `PointData` | `PointCloud2Data?` | Point cloud (with `RenderPassKind.Point`) |
 | `PointSize` | `float` | Pixel size of the point pass (`GL_POINTS`), default 3 |
-| `ShowLocalAxes` | `bool` | Whether to attach local axes (auto sub-object) |
+| `ShowLocalAxes` | `bool` | Whether to attach local axes (auto sub-object). The set is created with `AlwaysOnTop = true`: the marker annotates a node whose own mesh surrounds it, so it is drawn after the scene and no geometry can bury it |
 | `LocalAxesLength` | `float` | Default local axes length, default 0.3 |
-| `LocalAxes` | `Axes?` | Attached local axes (non-null when enabled) |
+| `LocalAxes` | `Axes?` | Attached local axes (non-null when enabled; tune it here — `AlwaysOnTop = false` gets the ordinary, occludable set back) |
 | `MaterialData` | `MaterialData?` | Material description (CPU); `null` = no draw/default |
 | `Visible` | `bool` | Whether the node takes part in the picture, default true. A **subtree** switch: off hides the node and all its descendants — the renderer does not descend past it — and the same subtree leaves ray picking by default as well (`Pick(..., hitInvisible: true)` is the way back in) |
 | `Highlighted` | `bool` | Whether highlighted (default false), selection feedback. The tint is applied by the Model pass; the line/point/axes passes are unlit and ignore it (they never take part in picking either) |
@@ -88,7 +88,7 @@ Methods:
 - `Vector3 WorldToLocal(Vector3 worldPoint)` / `Vector3 LocalToWorld(Vector3 localPoint)`
 
 ### `SceneGraph`
-Scene root container: holds the object tree, the active camera, lights, and scene display defaults (background/ambient/grid floor). The constructor auto-assembles the default camera pose, lights and grid floor; the world-origin axes are created only when `ShowWorldAxes` is on (off by default — the renderer's screen-space orientation gizmo answers "which way is X/Y/Z" without putting an occludable axes set in the scene). Selection is the same question asked about one node instead of the world: `Select` highlights what was picked and mounts that node's own local axes on it, so "what did I pick" and "which way does it point" arrive together. Those axes are **display only** — a plain child node with no drag affordance, and the scene never writes back to a node's transform, so reading a frame can never disturb a model whose poses belong to its joint chain.
+Scene root container: holds the object tree, the active camera, lights, and scene display defaults (background/ambient/grid floor). The constructor auto-assembles the default camera pose, lights and grid floor; the world-origin axes are created only when `ShowWorldAxes` is on (off by default — the renderer's screen-space orientation gizmo answers "which way is X/Y/Z" without putting an occludable axes set in the scene). Selection is the same question asked about one node instead of the world: `Select` highlights what was picked and mounts that node's own local axes on it (drawn on top of the geometry — `Axes.AlwaysOnTop`), so "what did I pick" and "which way does it point" arrive together. Those axes are **display only** — a plain child node with no drag affordance, and the scene never writes back to a node's transform, so reading a frame can never disturb a model whose poses belong to its joint chain.
 
 | Member | Type | Notes |
 |---|---|---|
@@ -101,7 +101,7 @@ Scene root container: holds the object tree, the active camera, lights, and scen
 | `WorldAxesLength` | `float` | World axes length in meters (default 0.5). A real length, because the default set is `AxesSizing.FixedWorldLength` |
 | `ShowOrientationGizmo` | `bool` | Draw the screen-space orientation gizmo (default true) |
 | `OrientationGizmoMargin` | `float` | Gap (pixels, default 16) between the orientation gizmo and the viewport's bottom/right edges. The widget is just three arrows and a hub ball — no backdrop. Its **size** belongs to the renderer, not to the scene: it is a fixed fraction of the viewport's shorter side (`Renderer.GizmoSizeRatio`), so the marker keeps the same visual weight at any window size (the old absolute-pixel `OrientationGizmoSize` is gone) |
-| `ShowSelectionAxes` | `bool` | Show the selected object's own local axes (default true; display only — a marker, never a drag handle) |
+| `ShowSelectionAxes` | `bool` | Show the selected object's own local axes (default true; display only — a marker, never a drag handle). Mounted `AlwaysOnTop`, so it stays readable inside the mesh it marks |
 | `SelectionAxesLength` | `float` | Reference length (m) of the axes mounted on the selected object, default 0.3 |
 | `Selected` | `GameObject?` | The currently selected object (read-only; change it through `Select` / `PickAndSelect`) |
 | `GridCellSize` / `GridCellCount` / `GridColor` | `float` / `int` / `Vector4` | Grid floor: cell edge (m) / cells per side / line color |
@@ -122,7 +122,7 @@ Methods:
 - Default assembly: `Grid? AddDefaultGrid()`, `void AddDefaultLights()`, `Axes? AddDefaultWorldAxes()`, `void ApplyDefaultCamera()` (the constructor already calls the first three, honouring `ShowGrid` / `ShowWorldAxes`) — mind the order this implies: the constructor runs *before* an object initializer, so `new SceneGraph { ShowGrid = false }` is too late (the grid already exists). That flag is only what `AddDefaultGrid()` consults, so turning a default off after construction means taking that node out (`Remove`)
 - `float FitWorldAxesToContent(float factor = 1.15f)` — size the axes to the content's largest world extent × `factor` (the axes, grid and lights are ignored while measuring), so they reach past the model instead of hiding inside it; applies to the set already in the scene and returns the applied length. `WorldAxesName` is the name it looks for
 - Picking: `RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`, `GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` — a hit needs `Visible` + `Pickable` + a non-null `MeshData`, and an invisible node ends the walk for its whole subtree (the very grouping `Visible` means for drawing); `hitInvisible: true` ignores visibility for whole subtrees, which is how an editor still selects what it just hid
-- Selection: `GameObject? Select(GameObject? obj, bool highlight = true)` — single selection with feedback: the new object takes the highlight and (with `ShowSelectionAxes`) its own local axes, mounted non-pickable so they never swallow a later click; the previous object loses both, and null clears. Only the axes `Select` mounted itself are unmounted. The marker displays a frame and never edits one — there are no drag handles anywhere in the library, so a pick can't touch a robot's joint-driven poses
+- Selection: `GameObject? Select(GameObject? obj, bool highlight = true)` — single selection with feedback: the new object takes the highlight and (with `ShowSelectionAxes`) its own local axes, mounted non-pickable so they never swallow a later click and on top of the geometry (`AlwaysOnTop`) so the mesh cannot swallow the marker instead; the previous object loses both, and null clears. Only the axes `Select` mounted itself are unmounted. The marker displays a frame and never edits one — there are no drag handles anywhere in the library, so a pick can't touch a robot's joint-driven poses
 - `GameObject? PickAndSelect(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` — `Pick` + `Select` in one call: a host's whole click path
 - `void Dispose()` — drops the node and light lists (GPU resources are released by the renderer)
 
@@ -143,6 +143,7 @@ All `GameObject` subclasses; the ctor generates CPU mesh + material, ready for `
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)` (axis +Z) / `Capsule(radius, height, name?)` (axis +Z; total height = height + 2×radius)
 - `GroundPlane(size, name?)` / `Arrow(...)` / `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
   - `Axes` has two sizing policies (`AxesSizing`): `ConstantScreenSize` (default, a marker whose screen size is fixed by `ScreenScale`/`MinWorldLength`/`MaxWorldLength`) and `FixedWorldLength` (the arrows measure exactly `Length` world units). `Length` stays writable in both, because the axes shader normalises by the arrow's own length.
+  - `AlwaysOnTop` (default **false**) is the set's depth policy. Off, the set is ordinary geometry that the model occludes. On, the renderer queues the whole set during the ordinary walk and draws it last, on a depth buffer it has just cleared, so no geometry can hide it — while the on-top sets still occlude each other correctly, a nearer one winning where two overlap. `GameObject.ShowLocalAxes` (and therefore `SceneGraph.Select`) turns it on, because a per-object frame marker sits inside the mesh it annotates; a `FixedWorldLength` ruler is meant to leave it off, since a ruler that shows through what it measures lies about the scene.
 
 ---
 

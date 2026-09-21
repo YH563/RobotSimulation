@@ -3,13 +3,14 @@
 `src/BareWindowTest` and `src/AvaloniaTest` are the repository's end-to-end check and, at the same time,
 its **smallest embedding example**: each loads **one URDF robot** into a default scene, renders it, and
 prints a log both hosts share. The window has exactly three behaviours — an orbit camera (left-drag
-rotate, middle-drag pan, right-drag or the wheel zoom), pick-to-select (highlight plus the picked link's own local axes), and the library's own grid
+rotate, middle-drag pan, right-drag or the wheel zoom), pick-to-select (highlight plus the picked link's own local axes, drawn on top of the mesh), and the library's own grid
 floor plus its screen-space orientation gizmo in the bottom-right corner. **Six pixels separate a click from a drag**: press and release inside that
 threshold is a click, anything beyond it is a drag. A click **does not move the camera** — the host
 restores the pose snapshot taken at press time and only then casts the ray, so that it is cast through
 the frame the user clicked on; otherwise a few pixels of hand jitter would turn "the link under this
 pixel" into "a link the ray has already drifted past". Clicking selects in one call
 (`SceneGraph.PickAndSelect`): the picked object is highlighted and the scene mounts its own local axes on it —
+drawn on top of the geometry (`Axes.AlwaysOnTop`), so the mesh it annotates cannot bury the frame it explains;
 display only, no drag affordance — so the link's frame is readable without touching the scene setup (or the model).
 This page is about that **one file**: where it
 lives, where it comes from, and how to swap it.
@@ -55,7 +56,8 @@ The camera is left alone as well: `SceneGraph`'s constructor already assembles t
 usable camera pose, and the host just keeps them. Orientation feedback needs no setup either — the renderer
 draws the screen-space gizmo in the bottom-right corner of whatever viewport the host set — and neither does
 selection feedback: the click goes straight to `SceneGraph.PickAndSelect`, which highlights the picked link and
-mounts that link's own axes on it (a marker to read, never a handle to drag). That is precisely the promise this
+mounts that link's own axes on it (a marker to read, never a handle to drag — drawn on top of the geometry, so the
+mesh it annotates cannot hide it). That is precisely the promise this
 library makes to an embedder — after `new SceneGraph()` you already have a scene worth looking at, with
 nothing to tune.
 

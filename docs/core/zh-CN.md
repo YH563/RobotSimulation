@@ -20,9 +20,9 @@
 | `LineData` | `LineData?` | 线段集（配合 `RenderPassKind.Line`） |
 | `PointData` | `PointCloud2Data?` | 点云（配合 `RenderPassKind.Point`） |
 | `PointSize` | `float` | 点通道的像素尺寸（`GL_POINTS`），默认 3 |
-| `ShowLocalAxes` | `bool` | 是否挂载本节点局部坐标轴（自动子对象） |
+| `ShowLocalAxes` | `bool` | 是否挂载本节点局部坐标轴（自动子对象）。挂载出来的轴系带 `AlwaysOnTop`：这条标记所标注的节点，网格本身就在它四周，所以它在场景画完之后绘制，任何几何都埋不掉它 |
 | `LocalAxesLength` | `float` | 局部坐标轴默认长度，默认 0.3 |
-| `LocalAxes` | `Axes?` | 已挂载的局部坐标轴（非 null 当启用后） |
+| `LocalAxes` | `Axes?` | 已挂载的局部坐标轴（非 null 当启用后；要微调就改这里——把 `AlwaysOnTop` 设回 false 又得到普通、会被遮挡的轴系） |
 | `MaterialData` | `MaterialData?` | 材质描述（CPU）；`null` 表示不绘制/默认外观 |
 | `Visible` | `bool` | 是否参与画面，默认 true。是**子树开关**：关闭即隐藏该节点**及其全部后代**（渲染器不再往下走），且同一子树默认也退出射线拾取（要拾取它得用 `Pick(..., hitInvisible: true)`） |
 | `Highlighted` | `bool` | 是否高亮（默认 false），用于选择反馈。该染色由 Model 通道施加；line/point/axes 通道不带光照、会忽略它（这些恰好也都是不参与拾取的显示辅助物） |
@@ -88,7 +88,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 - `Vector3 WorldToLocal(Vector3 worldPoint)` / `Vector3 LocalToWorld(Vector3 localPoint)`
 
 ### `SceneGraph`
-场景根容器：持有对象树、活动相机、灯光集合与场景显示默认值（背景/环境光/网格地面）。构造函数自动装配默认相机姿态、默认灯光与网格地面；世界坐标轴只在 `ShowWorldAxes` 打开时创建（默认关闭——「X/Y/Z 朝哪」由渲染器绘制的屏幕空间朝向 gizmo 承担，不必往场景里放一套会被模型遮挡、还会随缩放变形的坐标轴）。选择则是把同一个问题问到**某一个节点**上：`Select` 高亮选中的对象、并在它身上挂一套它自己的局部坐标轴——「选中了什么」与「它朝哪」一次一起给出。这套坐标轴是**纯显示**的：它只是一个普通子节点，没有任何拖拽手柄，场景也从不回写节点位姿——所以「看参考系」永远碰不到由关节链决定的姿态。
+场景根容器：持有对象树、活动相机、灯光集合与场景显示默认值（背景/环境光/网格地面）。构造函数自动装配默认相机姿态、默认灯光与网格地面；世界坐标轴只在 `ShowWorldAxes` 打开时创建（默认关闭——「X/Y/Z 朝哪」由渲染器绘制的屏幕空间朝向 gizmo 承担，不必往场景里放一套会被模型遮挡、还会随缩放变形的坐标轴）。选择则是把同一个问题问到**某一个节点**上：`Select` 高亮选中的对象、并在它身上挂一套它自己的局部坐标轴（画在几何之上，见 `Axes.AlwaysOnTop`）——「选中了什么」与「它朝哪」一次一起给出。这套坐标轴是**纯显示**的：它只是一个普通子节点，没有任何拖拽手柄，场景也从不回写节点位姿——所以「看参考系」永远碰不到由关节链决定的姿态。
 
 | 成员 | 类型 | 说明 |
 |---|---|---|
@@ -101,7 +101,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 | `WorldAxesLength` | `float` | 世界坐标轴长度（米，默认 0.5）。默认坐标系是 `AxesSizing.FixedWorldLength`，所以这是真实长度而非屏幕尺寸 |
 | `ShowOrientationGizmo` | `bool` | 是否绘制屏幕空间朝向 gizmo（默认 true） |
 | `OrientationGizmoMargin` | `float` | gizmo 到视口右下边缘的间距（像素，默认 16）。该控件只有三支箭头与一个中心小球，不带背景底盘；它的**尺寸**归渲染器管、不是场景设置——按视口较短边的固定比例计算（`Renderer.GizmoSizeRatio`），所以窗口大小变化时标记的视觉权重保持一致（原先固定像素的 `OrientationGizmoSize` 已移除） |
-| `ShowSelectionAxes` | `bool` | 是否在选中对象上显示它自己的局部坐标轴（默认 true；纯显示——是标记，不是拖拽手柄） |
+| `ShowSelectionAxes` | `bool` | 是否在选中对象上显示它自己的局部坐标轴（默认 true；纯显示——是标记，不是拖拽手柄）。挂载时带 `AlwaysOnTop`，所以在被标注的那块网格内部照样看得清 |
 | `SelectionAxesLength` | `float` | 选中对象所挂坐标轴的参考长度（米，默认 0.3） |
 | `Selected` | `GameObject?` | 当前选中的对象（只读；请经 `Select` / `PickAndSelect` 改变选择） |
 | `GridCellSize` / `GridCellCount` / `GridColor` | `float` / `int` / `Vector4` | 网格地板参数：格边长（米）/ 单侧格数 / 线色 |
@@ -122,7 +122,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 - 默认装配：`Grid? AddDefaultGrid()`、`void AddDefaultLights()`、`Axes? AddDefaultWorldAxes()`、`void ApplyDefaultCamera()`（构造函数已按 `ShowGrid` / `ShowWorldAxes` 调用前三个）—— 由此而来的顺序陷阱：构造函数**先于**对象初始化器执行，所以 `new SceneGraph { ShowGrid = false }` 为时已晚（网格已建好）。该标志只是 `AddDefaultGrid()` 的判断条件，构造后再关默认网格得把那个节点移除（`Remove`）
 - `float FitWorldAxesToContent(float factor = 1.15f)` —— 按场景内容世界包围盒的最大边长 × `factor` 重设坐标轴长度（测量时忽略坐标系自身、网格与灯光），让轴「伸出模型之外」而不是藏在模型里；会同步已经创建的那一套并返回所用长度，按 `WorldAxesName` 查找节点
 - 拾取：`RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`、`GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` —— 命中需要 `Visible` + `Pickable` 且有 `MeshData`；不可见节点会让**整棵子树**退出遍历（与绘制时的分组完全一致），而 `hitInvisible: true` 对整棵子树忽略可见性，供编辑器选中刚被隐藏的对象
-- 选择：`GameObject? Select(GameObject? obj, bool highlight = true)` —— 带反馈的单选：新对象拿到高亮，并在 `ShowSelectionAxes` 打开时挂上它自己的局部坐标轴（不可拾取，所以不会吞掉下一次点击）；旧对象两者一起失去，传 null 即清空。只有 `Select` 自己挂上的坐标轴才会被它卸下。该标记只**显示**参考系、从不修改它——库内任何地方都没有拖拽手柄，所以一次点击碰不到机器人由关节链决定的姿态
+- 选择：`GameObject? Select(GameObject? obj, bool highlight = true)` —— 带反馈的单选：新对象拿到高亮，并在 `ShowSelectionAxes` 打开时挂上它自己的局部坐标轴（不可拾取，所以不会吞掉下一次点击；又在几何之上，见 `AlwaysOnTop`，所以反过来也不会被网格吞掉）；旧对象两者一起失去，传 null 即清空。只有 `Select` 自己挂上的坐标轴才会被它卸下。该标记只**显示**参考系、从不修改它——库内任何地方都没有拖拽手柄，所以一次点击碰不到机器人由关节链决定的姿态
 - `GameObject? PickAndSelect(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` —— `Pick` + `Select` 一次完成，即宿主点击链路的全部
 - `void Dispose()` —— 清空节点与灯光引用（GPU 资源由渲染器释放）
 
@@ -143,6 +143,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)`（轴沿 +Z）/ `Capsule(radius, height, name?)`（轴沿 +Z，总高 = height + 2×radius）
 - `GroundPlane(size, name?)` / `Arrow(...)`（方向箭头）/ `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
   - `Axes` 有两种尺寸策略（`AxesSizing`）：`ConstantScreenSize`（默认，屏幕尺寸由 `ScreenScale`/`MinWorldLength`/`MaxWorldLength` 固定，适合做「节点标记」）与 `FixedWorldLength`（箭头长度恒为 `Length` 个世界单位，适合做「尺子」）。两种模式下 `Length` 都可写：坐标轴着色器按箭头自身长度做归一化，改长度不需要重建几何。
+  - `AlwaysOnTop`（默认 **false**）是该轴系的深度策略。关闭时它就是普通几何，模型能遮挡它；打开时渲染器在普通遍历里把整套轴系排队、最后在刚清空深度缓冲的画面上绘制，于是任何几何都藏不住它——而各轴系之间仍互相正确遮挡（两套重叠时近的那套胜出）。`GameObject.ShowLocalAxes`（因而 `SceneGraph.Select`）会把它打开，因为「对象自己的坐标系」正立在被标注的那块网格内部；`FixedWorldLength` 的尺子则应当保持关闭——一把能穿透被测物体的尺子，会把场景尺寸说成假的。
 
 ---
 

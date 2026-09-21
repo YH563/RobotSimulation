@@ -55,8 +55,11 @@ public class GameObject
 
     /// <summary>
     /// This node's local coordinate axes (child object): when enabled, a small RGB axes set is attached
-    /// under its Transform and moves/rotates/scales with it, rendered by ordinary recursion with no
-    /// renderer special-casing.
+    /// under its Transform and moves/rotates/scales with it. The set is created with
+    /// <see cref="Axes.AlwaysOnTop"/> on, because a frame marker sits inside the mesh it annotates: the
+    /// renderer draws it after the scene, on a cleared depth buffer, so the model can no longer bury the very
+    /// frame it is there to explain. Cleared, the flag on <see cref="LocalAxes"/> gets the ordinary,
+    /// occludable set back.
     /// </summary>
     public bool ShowLocalAxes
     {
@@ -68,7 +71,7 @@ public class GameObject
             _showLocalAxes = value;
             if (value)
             {
-                _localAxes ??= new Axes(LocalAxesLength, name: "local-axes");
+                _localAxes ??= new Axes(LocalAxesLength, name: "local-axes") { AlwaysOnTop = true };
                 _localAxes.SetSubtreePickable(
                     false); // The local axes are a display aid and should not participate in picking.
                 _localAxes.Transform.Parent = Transform;
