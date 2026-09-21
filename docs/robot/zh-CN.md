@@ -78,13 +78,14 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 > 命名空间 `RobotSimulation.Robot.Description`。纯数据、零渲染依赖、可序列化；只覆盖可视化相关信息，忽略物理参数（inertial、collision 等）。
 
-- `RobotDescription`：`Name`（`<robot name>`）、`RootLink`、`Links` / `Joints`（`IReadOnlyList`）。
-- `Link`：`Name`、`Visual`（根视觉）或 `Visuals`（多视觉）、可选 `Inertial`（未用）。
-- `VisualElement`：`Name`、`Geometry`、`MaterialName`、`LocalTransform`（行主序 `Matrix4x4`）、可选 `Visible`。
-- `Joint`：`Name`、`Type`、`ParentLink`、`ChildLink`、`Origin`（`Matrix4x4`）、`Axis`、`Limits`、`Mimic`。
-  - `JointType`: `Revolute/Continuous/Prismatic/Fixed/Planar/Floating`。
+- `RobotDescription`：`Name`（`<robot name>`）、`Links` / `Joints`（`List`，可变）、`RootLinks`（计算得出：没有被任何 joint 当作 child 的 link）、`FindLink(name)`。
+- `Link`：`Name`、`VisualElements`（`List<VisualElement>`，URDF 一个 link 可以有多个 visual）。
+- `VisualElement`：`LocalTransform`（行主序 `Matrix4x4`）、`Geometry`、可选 `Material`（`MaterialElement?`；为 null 即用渲染层默认外观）。
+- `MaterialElement`：`Name`、`Color`（`Vector4?`）、`TextureFile`（原始引用字符串）。
+- `Joint`：`Name`、`Type`、`ParentLinkName`、`ChildLinkName`、`Origin`（`Matrix4x4`）、`Axis`。
+  - `JointType`：`Fixed/Revolute/Continuous/Prismatic`。URDF 的 `planar` / `floating` 不在模型中，`limit` / `mimic` / `inertial` / `collision` 也不解析——只看可视化。
   - joint 即「给定关节值 → 子 link 相对父 link 的变换」。revolute/continuous 绕 `Axis` 转角，prismatic 沿 `Axis` 平移，fixed 无自由度。
-- `Geometry` 基类：
+- `GeometryElement` 基类（多态 record 联合类型；姿态由 `VisualElement` 持有，不在这一层）：
   - `BoxGeometry(Vector3 Size)`
   - `SphereGeometry(float Radius)`
   - `CylinderGeometry(float Radius, float Length)` —— 轴沿 +Z

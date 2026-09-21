@@ -136,27 +136,35 @@ Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资�
 | ADR-022 | 点云增量更新：数据层「可增长缓冲 + 环形起点 + 修订号/变更窗口」，后端拉取式局部上传（`PointMesh.Sync`），并按帧戳回收 GPU 资源缓存 | 追加不搬数据、驱逐只移动环形起点 → 每帧只上传新增的几个点；`Revision` 未变则一个字节也不传 |
 | ADR-023 | 朝向反馈按性质一分为二：场景里的坐标轴是普通、会被遮挡的「尺子」（`AxesSizing.FixedWorldLength`，`FitWorldAxesToContent` 让它伸出模型之外）；屏幕空间 gizmo 由渲染器画在视口右下角（独占视口 + 限定在 `glScissor` 内的深度清理，永不被遮挡、永不参与拾取）。默认场景不开世界坐标轴、开 gizmo | 「X/Y/Z 朝哪」是 UI 问题，「一米有多长」是场景问题——各自在自己的空间里回答，互不干扰 |
 | ADR-024 | 选择反馈成对出现、由场景装配：`SceneGraph.Select` 既高亮被点中的对象，又在它身上挂该节点自己的局部坐标轴（不可拾取；`ShowSelectionAxes` 默认开）；渲染器的角落 gizmo 则保持「裸标」——三支箭头 + 一个原点小球，不带背景底盘。两者都**只用于显示**：库内不提供任何拖拽手柄，场景也从不回写位姿 | 高亮只说明「选中了什么」，说不出这个节点的坐标系朝哪；世界原点的坐标轴又与被选中的对象无关——两者本属同一次点击。而机器人各 link 的位姿归关节链所有，只「显示」参考系的反馈永远不会与运动学打架 |
+| ADR-025 | 场景结构变更改为**帧边界提交**：`SceneGraph.Add` / `Remove` 在属主线程上照旧立即生效，其它线程只入 `ConcurrentQueue`；帧边界 `ApplyPendingChanges()`（`Update` 与每个 `IRenderer.Render` 实现都会先调）统一合入 `Roots` / `Lights`，并发布单调 `Version` 与 `PendingChangeCount`（只覆盖**结构**变更：位姿/关节值等纯数据仍按「发布—交接」用）；`Remove` 顺带清掉指向已离场景节点的选择，`Dispose` 之后的结构变更被忽略（记一次警告）；**写权只声明一次**——构造线程即属主，帧循环在别的线程上时由宿主在开跑前用 `ClaimOwnership()` 显式交接，`ApplyPendingChanges()` 不再「谁调谁是属主」、在非属主线程上直接抛 `InvalidOperationException`（帧边界与「允许遍历 `Roots` 的线程」必须永远是同一个）；`Transform.Parent` 这条后门一并折进同一队列（属主线程上立即生效并同步 `Roots` 成员关系，其它线程入队），`Transform.Children` 变为只读视图；队列加 `MaxPendingChanges` 上限与 `DroppedPendingChangeCount`（超限丢弃 + 记一次警告，让误用可见） | 「一边渲染一边加对象」原本只是**碰巧**能跑（活遍历 + 惰性 GPU 上传），却没有任何契约：跨线程 `Add` 会让渲染遍历抛 `Collection was modified`，删掉选中节点会留下悬空选择，灯光越过着色器上限则静默丢灯。把结构变更收拢到帧边界，等于把「发布—交接」这条并发规则写进代码：生产者只入队、渲染只遍历自洽快照，代价仅是「最迟下一帧可见」——与 Unreal/Godot/Unity 的命令队列、PhysX/Bevy 的双缓冲 Extract、rviz 的 `queueRender()` 是同一套语义。ADR-025 的第二半在实现中补齐：让生产者只入队，只解决了「生产者碰不到列表」，没解决「谁算生产者」——原来的帧边界会把调用线程认作属主，于是一次从别的线程来的、本该入队的调用就翻掉了属主，把上一个属主（可能正在遍历）变成外来者，「谁可以写」于是变成每调用一次一个答案。整帧只能有一个答案：属主在构造时确定、可在开跑前一次性显式交接，越界一律抛异常而不是静默改道。同理，`Transform.Parent` 直接改 `Children` 是同一条规则的后门（它还会让节点同时留在 `Roots` 与父节点下，于是 `Remove` 要调两次才干净），一并折进队列；未声明上限的队列也让「以数据频率入队结构变更」这种误用不可见，所以给了上限与丢弃计数 |
 
 ---
 
 ## 5. 运行时与线程模型
 
 ```text
-                host UI/更新线程              host 渲染线程
-               ─────────────────           ─────────────────
-update loop:   scene.Update(dt)  ──► (纯数据，改 Transform/关节值)
-               robot.SetJointValue(...)   │
-                                          ▼
-render loop:                        renderer.Render(scene)
-                                    ├─ 遍历 scene.Roots
-                                    ├─ 按 PassKind 分发 (Model/Line/Point/Axes)
-                                    ├─ 数据→GPU 资源 缓存/创建（Mesh/Material/Texture/Shader）
-                                    └─ 绘制
+    生产线程（传感器 / worker，任意）      host 帧循环线程（更新与渲染同一线程 = 场景属主）
+   ──────────────────────────────      ─────────────────────────────────────────
+producers: scene.Add / scene.Remove    update:  scene.Update(dt)
+           transform.Parent = parent
+            ├─ 属主线程? → 直接改列表             ├─ 帧边界：ApplyPendingChanges()
+            └─ 其它线程 → 入队 _pending           └─ 递归 GameObject.Update（纯数据）
+                                                      │
+                                          render:  renderer.Render(scene)
+                                                      ├─ 帧边界：ApplyPendingChanges()
+                                                      ├─ 遍历 scene.Roots
+                                                      ├─ 按 PassKind 分发 (Model/Line/Point/Axes)
+                                                      ├─ 数据→GPU 资源 缓存/创建（Mesh/Material/Texture/Shader）
+                                                      └─ 绘制
 ```
 
-- **数据可以任意线程写**：`GameObject` / `Transform` / `MeshData` / `MaterialData` 等为纯数据，可在任意线程构建、随后在渲染前被读取。
+- **数据可以任意线程写**：`GameObject` / `Transform` / `MeshData` / `MaterialData` 等为纯数据，可在任意线程构建、随后在渲染前被读取（**结构**不在其列，见下一条）。
+- **结构变更走帧边界，且写权只声明一次**：`SceneGraph.Add` / `Remove` / `Transform.Parent`（重挂）可从任意线程调用。属主线程上立即生效——属主是**构造线程**，或宿主在开跑前用 `SceneGraph.ClaimOwnership()` 显式交接过去的帧循环线程；其它线程只把变更入 `ConcurrentQueue`，由**帧边界** `SceneGraph.ApplyPendingChanges()` 在遍历之前统一合入 `Roots` / `Lights`。帧边界由库自己踩：渲染器在每个 `Render` 开头、`Update` 在递归之前都会调用它，所以宿主帧循环一行都不用改（第二次调用发现队列为空，连锁都不取）。帧边界**不再**把调用线程认作属主：在非属主线程上调用会抛 `InvalidOperationException`，并指向 `ClaimOwnership()`——因为「允许遍历 `Roots` 的线程」和「允许写列表的线程」必须是同一个，而静默改道会让上一个属主（可能正在遍历）变成外来者，于是同一个框架既可能安全、也可能偶发抛 `Collection was modified`。生产者从不触碰列表 → 遍历永远看不到「枚举中被改」；`Version` 单调递增供宿主失效缓存，`PendingChangeCount` 供诊断，队列超过 `MaxPendingChanges`（默认 65536）后丢弃后续变更并记一次警告、把丢弃数记进 `DroppedPendingChangeCount`（上限不是性能旋钮，是让「以数据频率入队结构变更」这类误用可见）。代价是结构变更**最迟下一帧可见**——渲染始终基于一个自洽的快照，这正是「发布—交接」该有的样子。
+- **`Roots` 的不变式是「加过且无父节点」**：`Roots` / `Lights` 里只放真正的场景根；一个根节点后来获得了父节点（`Transform.Parent`）就从 `Roots` 里退出（它改由父节点抵达），`Remove` 也会把两处都清掉。于是不存在「同时挂在 `Roots` 和父节点下」的状态——那种状态里同一棵树会被遍历、绘制、拾取、测量两次，而且 `Remove` 得调两次才彻底消失。
+- **子列表只读**：`Transform.Children` 是只读视图，重挂只能经 `Parent` 赋值（在场景里就是上面那条队列）。渲染器每帧都要遍历这些列表，让它们对「别的线程」不可写，是「遍历永远看不到列表被改」这半句话的另一半。
+- **纯数据本身不带同步**：`Transform` / 关节值的写入与渲染读取之间没有锁、也没有内存栅栏（与游戏引擎的常规做法一致——每帧的位姿写入本就属于帧循环线程）。要「另一个线程算、这一帧显示」，按「写完 → 发布 → 再读」的交接用法，或走 `PointCloud2Data` 这类自带 `Revision` 握手的数据层。库内唯一保证线程安全的是**结构变更**（上一条）。同一个节点（连同它已挂上的子树）也不要同时从两个线程改：结构路由靠「这个节点现在属不属于某个场景」来判断，而一棵正在被挂进场景的子树还不算「已发布」——先把子树搭好再 `Add`，或者只从属主线程改它。
 - **只有渲染线程碰 GL / GPU 资源**：`Renderer` 拥有所有网格/材质/纹理缓存与释放；`IRenderContext.Clear` 也在渲染线程调用。
-- **更新线程只写 CPU 数据**，绝不能调用任何 GL 类型。`SceneGraph.Update(deltaTime)` 会递归调用各 `GameObject.Update`。
+- **更新线程只写 CPU 数据**，绝不能调用任何 GL 类型。`SceneGraph.Update(deltaTime)` 会递归调用各 `GameObject.Update`。由于 `Update` 与 `Render` 都是帧边界（都要合入排队中的结构变更），两者必须在**同一线程**（宿主帧循环）上调用。
 - **`Logger` 任意线程可用**：进程级静默门面；宿主在组合根用 `Logger.Initialize(...)` 附加 provider。
 - **`GameTimer`** 是后台线程固定帧率滴答器（模拟/更新用），不用于渲染循环本身。
 - **`FrameStats` / `GraphicsDeviceInfo` 均为纯数据**：后端在渲染线程更新 `IRenderer.Stats`，并在设备上下文创建时一次性填充 `IRenderContext.DeviceInfo`；宿主仅用于显示（在自身选择的线程上读取即可）。

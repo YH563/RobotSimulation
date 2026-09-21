@@ -24,8 +24,8 @@
 | `LocalAxesLength` | `float` | 局部坐标轴默认长度，默认 0.3 |
 | `LocalAxes` | `Axes?` | 已挂载的局部坐标轴（非 null 当启用后） |
 | `MaterialData` | `MaterialData?` | 材质描述（CPU）；`null` 表示不绘制/默认外观 |
-| `Visible` | `bool` | 是否可见，默认 true |
-| `Highlighted` | `bool` | 是否高亮（默认 false），用于选择反馈 |
+| `Visible` | `bool` | 是否参与画面，默认 true。是**子树开关**：关闭即隐藏该节点**及其全部后代**（渲染器不再往下走），且同一子树默认也退出射线拾取（要拾取它得用 `Pick(..., hitInvisible: true)`） |
+| `Highlighted` | `bool` | 是否高亮（默认 false），用于选择反馈。该染色由 Model 通道施加；line/point/axes 通道不带光照、会忽略它（这些恰好也都是不参与拾取的显示辅助物） |
 | `HighlightColor` | `Vector4` | 高亮混合色，默认橙黄 |
 | `Pickable` | `bool` | 是否参与射线拾取，默认 true |
 | `UpdateBehaviors` | `IReadOnlyList<IUpdateBehavior>` | 已挂载的更新行为（按执行顺序；无则空） |
@@ -100,20 +100,28 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 | `ShowWorldAxes` | `bool` | 是否显示默认世界原点坐标轴（默认 **false**：需要世界尺度参照时再打开） |
 | `WorldAxesLength` | `float` | 世界坐标轴长度（米，默认 0.5）。默认坐标系是 `AxesSizing.FixedWorldLength`，所以这是真实长度而非屏幕尺寸 |
 | `ShowOrientationGizmo` | `bool` | 是否绘制屏幕空间朝向 gizmo（默认 true） |
-| `OrientationGizmoSize` / `OrientationGizmoMargin` | `float` | gizmo 方块边长 / 到右下边缘的间距（像素，默认 160 / 16）。该控件只有三支箭头与一个中心小球，不带背景底盘 |
+| `OrientationGizmoMargin` | `float` | gizmo 到视口右下边缘的间距（像素，默认 16）。该控件只有三支箭头与一个中心小球，不带背景底盘；它的**尺寸**归渲染器管、不是场景设置——按视口较短边的固定比例计算（`Renderer.GizmoSizeRatio`），所以窗口大小变化时标记的视觉权重保持一致（原先固定像素的 `OrientationGizmoSize` 已移除） |
 | `ShowSelectionAxes` | `bool` | 是否在选中对象上显示它自己的局部坐标轴（默认 true；纯显示——是标记，不是拖拽手柄） |
 | `SelectionAxesLength` | `float` | 选中对象所挂坐标轴的参考长度（米，默认 0.3） |
 | `Selected` | `GameObject?` | 当前选中的对象（只读；请经 `Select` / `PickAndSelect` 改变选择） |
 | `GridCellSize` / `GridCellCount` / `GridColor` | `float` / `int` / `Vector4` | 网格地板参数：格边长（米）/ 单侧格数 / 线色 |
 | `Lights` | `IReadOnlyList<Light>` | 场景灯光（`Add` 自动收集） |
+| `Version` | `long` | 已应用的结构变更计数（单调、可无锁读取）：自己从 `Roots` 派生出来的缓存可以据此失效，只有「它变了」有意义，起始值无意义 |
+| `PendingChangeCount` | `int` | 其它线程已排队、尚未应用的变更数（诊断用：帧边界没在跑时它会一直涨） |
+| `MaxPendingChanges` | `int` | 生产者队列的上限（默认 `DefaultMaxPendingChanges` = 65536，0 = 不限）：超过后丢弃后续变更并记一次警告。它不是性能旋钮，而是让误用可见——以数据频率入队结构变更时，队列会一直涨到内存为止，那比一行警告难查得多 |
+| `DroppedPendingChangeCount` | `long` | 因超过 `MaxPendingChanges` 而被丢弃的变更数（诊断用；健康时恒为 0） |
+| `IsOwnerThread` | `bool` | 调用线程是否场景属主线程——允许遍历 `Roots` / `Lights`、允许跑 `Update` / `ApplyPendingChanges`，也是 `Add` / `Remove` 立即生效的那个线程 |
 
 方法 / Methods:
-- `void Add(GameObject? obj)` —— 加入场景（根节点自动登记；`Light` 同时进 `Lights`）
-- `void Remove(GameObject? obj)` —— 移出场景（`Light` 同时出 `Lights`）
-- `Update(double deltaTime)` —— 递归调用各节点 `Update`（更新线程）
-- 默认装配：`Grid? AddDefaultGrid()`、`void AddDefaultLights()`、`Axes? AddDefaultWorldAxes()`、`void ApplyDefaultCamera()`（构造函数已按 `ShowGrid` / `ShowWorldAxes` 调用前三个）
+- `void Add(GameObject? obj)` —— 加入场景（根节点自动登记；`Light` 同时进 `Lights`）。**任何线程可调**：在场景属主线程（构造线程，或宿主在开跑前用 `ClaimOwnership()` 显式交接过去的帧循环线程）上立即生效，在其它线程上入队、于下一个帧边界生效——这正是「一边渲染一边往场景里加对象」安全的原因（队列把"结构变更"收拢到帧边界，渲染遍历永远不会撞上正在被改的列表）。生效后的对象与一开始就在场景里的对象完全一样：渲染器是**惰性**创建 GPU 资源的（首帧见到才建），且每帧都重新遍历 `Roots`。带父节点的对象不是根：给它 `Add` 不会重复登记（它由父节点抵达），而一个根节点之后获得父节点时会从 `Roots` 里退出——所以同一个节点不会既在 `Roots` 又在父节点下面
+- `void Remove(GameObject? obj)` —— 移出场景（`Light` 同时出 `Lights`）；线程契约同 `Add`。根列表与父节点两处都会清（不是「看它的 `Parent` 指向哪就清哪」），所以**移除是幂等的**：不论节点当前处于什么状态，一次 `Remove` 就够，不存在「要删两次才消失」。被移出的节点不会留在选择里：移除选中节点、或移除它的某个祖先（整棵子树一起离开）都会一并撤掉选择的高亮与 `Select` 挂上的坐标轴
+- `int ApplyPendingChanges()` —— **帧边界**：应用其它线程排队的结构变更（`Add` / `Remove` / 重挂），返回本次应用了几条。`Update` 与渲染器（`IRenderer.Render` 的实现）都会替宿主先调一次，所以常规帧循环无需自己调（一帧里的第二次调用发现队列为空会直接返回，连锁都不取）；自己驱动渲染链路的宿主可以自行调用。它必须在**属主线程**上调用，且**不再把调用线程认作属主**：非属主线程上调用会抛 `InvalidOperationException` 并指向 `ClaimOwnership()`——「允许遍历 `Roots` 的线程」和「允许写列表的线程」必须永远是同一个，静默改道会让上一个属主（可能正在遍历）变成外来者。`Dispose` 之后它只清空队列、不再应用——帧边界不为迟到的生产者抛异常
+- `void ClaimOwnership()` —— 把场景显式交接给调用线程（**开跑之前**调用一次）：此后该线程是属主，`Add` / `Remove` 在它上面立即生效，`Update` / `ApplyPendingChanges` 也能在它上面跑。用于「在 A 处建场景、在 B 线程跑帧循环」的宿主；在帧循环里（或帧循环所在线程上）`new SceneGraph()` 的宿主永远不需要它。已经跑过帧边界之后再交接会抛异常（当前属主可能正在遍历列表，第二个属主正好会踩上去）；在属主线程上调用是空操作，所以可以防御性地调
+- `Update(double deltaTime)` —— 先过帧边界（`ApplyPendingChanges`）再递归调用各节点 `Update`（只写 CPU 数据，绝不碰 GL）。因为 `Update` 与 `Render` 都是帧边界，二者必须在**同一线程**（宿主帧循环）上调用——也就是场景属主线程
+- 树的重挂：`Transform.Parent` 赋值是唯一入口（`Transform.Children` 是只读视图）。节点已在场景里时，赋值走场景的帧边界：属主线程上立即生效并同步 `Roots` 成员关系，其它线程上入队、最迟下一帧可见；节点加入场景之前不属于任何场景，此时在任意线程上建树仍是立即生效（`Add` 之前先把子树搭好是推荐姿势）。赋一个会成环的父节点（自身或自己的后代）会抛 `ArgumentException`；若该变更来自别的线程、到帧边界时才被发现已经成环，则丢弃并记一次警告——不为一个「发出时合法」的请求把帧循环打下来
+- 默认装配：`Grid? AddDefaultGrid()`、`void AddDefaultLights()`、`Axes? AddDefaultWorldAxes()`、`void ApplyDefaultCamera()`（构造函数已按 `ShowGrid` / `ShowWorldAxes` 调用前三个）—— 由此而来的顺序陷阱：构造函数**先于**对象初始化器执行，所以 `new SceneGraph { ShowGrid = false }` 为时已晚（网格已建好）。该标志只是 `AddDefaultGrid()` 的判断条件，构造后再关默认网格得把那个节点移除（`Remove`）
 - `float FitWorldAxesToContent(float factor = 1.15f)` —— 按场景内容世界包围盒的最大边长 × `factor` 重设坐标轴长度（测量时忽略坐标系自身、网格与灯光），让轴「伸出模型之外」而不是藏在模型里；会同步已经创建的那一套并返回所用长度，按 `WorldAxesName` 查找节点
-- 拾取：`RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`、`GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`
+- 拾取：`RaycastHit? Pick(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)`、`GameObject? PickAndHighlight(Ray ray, bool enable = true, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` —— 命中需要 `Visible` + `Pickable` 且有 `MeshData`；不可见节点会让**整棵子树**退出遍历（与绘制时的分组完全一致），而 `hitInvisible: true` 对整棵子树忽略可见性，供编辑器选中刚被隐藏的对象
 - 选择：`GameObject? Select(GameObject? obj, bool highlight = true)` —— 带反馈的单选：新对象拿到高亮，并在 `ShowSelectionAxes` 打开时挂上它自己的局部坐标轴（不可拾取，所以不会吞掉下一次点击）；旧对象两者一起失去，传 null 即清空。只有 `Select` 自己挂上的坐标轴才会被它卸下。该标记只**显示**参考系、从不修改它——库内任何地方都没有拖拽手柄，所以一次点击碰不到机器人由关节链决定的姿态
 - `GameObject? PickAndSelect(Ray ray, Func<GameObject,bool>? predicate = null, bool hitInvisible = false)` —— `Pick` + `Select` 一次完成，即宿主点击链路的全部
 - `void Dispose()` —— 清空节点与灯光引用（GPU 资源由渲染器释放）
@@ -128,7 +136,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 - `Ray ScreenToWorldRay(Vector2 screenPositionPixels, Vector2 viewportSizePixels)` —— 拾取入口：屏幕像素（左上原点、X 右、Y 下）→ 世界射线。**两个参数都是像素**，且视口尺寸必须与渲染用的那块视口一致（像素→NDC 由二者比值决定），否则射线会偏
 
 ### `Light`
-`enum LightType { Directional, Point }`。成员：`Type`, `Color`（`Vector3` 强度）、`Direction` / `Position`、`Intensity`、`Range`。暴露 `WorldPosition` / `WorldDirection`（渲染用）。
+`enum LightType { Directional, Point }`。成员：`Type`, `Color`（`Vector3` 强度）、`Position` / `Direction`（与其他 `GameObject` 一致，都是节点自身坐标系下的值）、`Intensity`、`Range`。渲染器读的是世界坐标对 `WorldPosition` / `WorldDirection`（位置沿祖先链复合，方向经祖先链传递并重新归一化），所以挂在别的节点下的灯（机器人上的灯具）会从它真正所在的位置照亮；不可见的灯（`Visible = false`）完全不参与着色。`Range` 目前只是被携带、尚未被消费：标准着色还没有衰减项。
 
 ### `GameObject` 图元（`Scene/Primitives/`）
 均为 `GameObject` 派生，构造即生成 CPU 网格与材质，可直接 `scene.Add`：
@@ -264,3 +272,5 @@ CPU 侧贴图引用，只描述「哪个文件、何种语义」，不持有 GPU
 | public 字段暴露内部 `Transform` 直接改写（作为正规用法） | 绕过只读保护，线程/所有权不清 |
 | 把 GL/UI 类型放进数据模型 | 模型必须可序列化、可 headless |
 | 库内实现点选菜单/属性面板等应用交互 | 交互属宿主 UI 框架职责 |
+| 在非属主线程遍历 `SceneGraph.Roots` / `Lights`，或指望非属主线程的 `Add` 立刻出现在里面 | 结构变更在帧边界提交：遍历与读取属属主线程（渲染线程）；生产者只入队，生效时刻是下一个帧边界 |
+| 把 `SceneGraph.Update` 与 `Renderer.Render` 放在两个线程上 | 二者都是帧边界（都要合入排队中的结构变更），分到两个线程等于让两次提交互相并发 |

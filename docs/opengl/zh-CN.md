@@ -32,21 +32,22 @@ public static class GraphicsFactory
 - `event Action<int,int>? Resized`、`Resize(int width, int height)`、`Clear(Vector4 clearColor, bool clearDepth = true)`。
 - `GraphicsDeviceInfo DeviceInfo`：设备/驱动字符串（`Vendor` / `Renderer` / `ApiVersion` / `ShaderVersion`），构造时经 `GL.GetString` 读取一次并以纯字符串暴露（不外泄 `GLEnum`/`StringName`）。
 - `internal GL NativeGl`：供同程序集渲染层使用，不向外暴露；`GL` 仅允许存在于本类型内。
+- `internal (int Width, int Height) ViewportSize`：宿主经 `Resize` 设置的最后一次视口矩形。渲染器绘制的屏幕空间叠加层（朝向 gizmo）用它来定位**并**定尺寸（尺寸是视口较短边的比例），而不是去猜窗口大小。
 
 ---
 
 ## 2. 渲染器 / Renderer (`Rendering/`)
 
 ### `Renderer`（`IRenderer` 实现）
-`Render(scene)` 遍历场景，把「数据 → GPU 资源」实例化并绘制。它拥有所有网格/材质/纹理缓存与释放生命周期。
+`Render(scene)` 遍历场景，把「数据 → GPU 资源」实例化并绘制。它拥有所有网格/材质/纹理缓存与释放生命周期。遍历在不可见节点处终止（`GameObject.Visible == false`）：该节点与其整棵子树既不绘制也不继续下探；不可见 `Light` 不进灯光收集，不贡献任何着色。
 
 - 按 `RenderPassKind`（Model/Line/Point/Axes）分发；`Skybox` 为场景级未来背景通道，不由普通节点绘制。
-- 场景画完后，若 `SceneGraph.ShowOrientationGizmo` 打开，再画一趟朝向 gizmo（三支 RGB 箭头 + 原点小球，几何走 axes 通道，**不带背景底盘**）：它占视口右下角一个自己的方形视口（深度清理限定在 `glScissor` 框内，因为 `glClear` 不受视口影响），相机只取场景相机朝向、配正交投影 → 像素尺寸恒定；因此它永不被几何遮挡、也永不参与拾取。画完会把视口恢复为整屏——宿主可能只在尺寸变化时才设置视口。
-- 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。
+- 场景画完后，若 `SceneGraph.ShowOrientationGizmo` 打开，再画一趟朝向 gizmo（三支 RGB 箭头 + 原点小球，几何走 axes 通道，**不带背景底盘**）：它占视口右下角一个自己的方形视口（深度清理限定在 `glScissor` 框内，因为 `glClear` 不受视口影响），相机只取场景相机朝向、配正交投影 → 相机远近与缩放都不改变它的像素尺寸；而方块边长本身是按**视口较短边的固定比例**取的（`Renderer.GizmoSizeRatio`，带像素上下限 `GizmoMinSize` / `GizmoMaxSize`），所以窗口变大时标记同比例变大，而不是一个固定像素的方块；因此它永不被几何遮挡、也永不参与拾取。画完会把视口恢复为整屏——宿主可能只在尺寸变化时才设置视口。
+- 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。超出上限的可见灯会被丢弃（着色器的 uniform 数组就这么宽），并在**溢出期间记一次** `Logger.Warning`（场景重新装得下之后自动复位，下次溢出会再报），所以「运行时往场景里加灯」不会变成静默少光。
 - `HighlightBlend = 0.30f`：高亮混合系数。
 - `FrameStats Stats`：帧时序统计（`Fps` / 最近帧与平滑帧耗时 / `FrameCount`），由两次 `Render` 调用间隔经指数滑动平均得到；在渲染线程更新。
 - 每帧开头的缓存清扫：GPU 资源缓存按帧打戳，连续 240 帧未被任何节点用到的条目会被释放——这样替换某个对象的数据（或把它移出场景）不会把它旧的 GPU 缓冲一直留到渲染器销毁；点云绘制前先 `PointMesh.Sync(data)` 拉取同步，修订号未变则完全不做任何上传。
-- 出于安全，`Render` 从渲染线程调用；`_disposed` 后会抛 `ObjectDisposedException`。
+- 出于安全，`Render` 从渲染线程调用；`_disposed` 后会抛 `ObjectDisposedException`。它同时是场景的**帧边界**：先调用 `SceneGraph.ApplyPendingChanges()`，把其它线程排队的 `Add` / `Remove`（以及重挂）合入 `Roots` / `Lights` 之后才开始遍历——所以宿主可以一边渲染一边从 worker 线程往场景里加对象（最迟下一帧可见），而渲染遍历永远看不到「枚举中被改」。队列为空时这次调用立刻返回（连锁都不取），所以 `Update` 之后再来一次不会白花时间。**帧边界只属于场景属主线程**：渲染线程必须就是它（宿主在帧循环里 `new SceneGraph()` 即满足），或者由宿主在开跑前用 `SceneGraph.ClaimOwnership()` 交接过去；否则 `Render` 会抛 `InvalidOperationException`——渲染线程与「允许写 `Roots` 的线程」必须永远是同一个，这正是渲染遍历看不到列表被改的前提。
 
 构造函数需要 `GraphicsContext`（设备层），宿主经 `GraphicsFactory.Create(gl)` 得到。
 
@@ -130,3 +131,5 @@ context.Dispose();
 | 让 `Core` / `Robot` 引用 `Silk.NET.*` 或 `StbImageSharp` | 破坏 headless / 可序列化 / 跨后端可移植性 |
 | 在非渲染线程调用 `Render`/`Clear`/GPU 资源方法 | GL 只能在渲染线程操作 |
 | 把 `GL`/`GraphicsContext` 当作 public API 向外传播 | 宿主只应持有 `IRenderContext`/`IRenderer` |
+| 一个线程渲染、另一个线程跑 `scene.Update` | 两者都是场景的帧边界（都会先 `SceneGraph.ApplyPendingChanges()`），必须是**同一个**线程——即场景属主线程；帧边界在非属主线程上会抛 `InvalidOperationException`，而不是静默换属主 |
+| 在 A 线程 `new SceneGraph()`、在 B 线程跑帧循环，却不交接 | 属主默认是构造线程，帧边界在 B 上会抛；在 B 上开跑前调一次 `SceneGraph.ClaimOwnership()` 即可（只此一次，跑过帧边界之后就不能再交接了） |

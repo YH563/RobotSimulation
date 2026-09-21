@@ -90,7 +90,8 @@ float spin = 0;
 marker.AddUpdate((go, dt) =>
     go.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, spin += (float)dt));
 
-// 每次更新：驱动关节、跑行为/更新场景（后台线程），随后由 Renderer 在渲染线程绘制
+// 每帧：驱动关节、跑行为/更新场景，随后绘制——更新与渲染共用同一个帧循环线程；
+// SceneGraph.Add/Remove 还可以从任意其它线程调用（会先入队，到该帧边界才生效）
 scene.Update(deltaTime);
 ```
 
@@ -165,7 +166,7 @@ dotnet run --project src/AvaloniaTest
 - **坐标**: 世界右手系、**Z 向上**（Z-up），相机 up = +Z；图元回转轴沿 +Z（URDF/ROS 语义）。
 - **单位**: 长度用米；角度/关节角用弧度；颜色用 `Vector4` RGBA，分量 `[0,1]`。
 - **渲染数据**: `MeshData` / `MaterialData` 等是纯 CPU 数据，可在任意线程构建调整；GPU 资源由渲染后端在渲染线程实例化并缓存释放。
-- **线程**: 场景修改与 `SceneGraph.Update` 在更新线程；`Render` 只在渲染线程；`Logger` 任意线程可用。
+- **线程**: `Update` 与 `Render` 共用同一个帧循环线程（二者都是场景的帧边界）；`SceneGraph.Add` / `Remove` 可以从**任意**线程调用——非属主线程上先入队、到下一个帧边界才生效，所以正在渲染的场景也能持续生长；`Logger` 任意线程可用。
 - **依赖方向**: 宿主 → `OpenGL`/`Robot` → `Core`；`Core` 永不引用 `Robot` / `OpenGL` / 任何 UI 框架。
 
 ## 7. 路线图 / Roadmap

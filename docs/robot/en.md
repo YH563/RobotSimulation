@@ -78,13 +78,14 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 > Namespace `RobotSimulation.Robot.Description`. Pure data, zero render deps, serializable; covers only visualization-relevant info, ignoring physical parameters (inertial, collision, etc).
 
-- `RobotDescription`: `Name` (`<robot name>`), `RootLink`, `Links` / `Joints` (`IReadOnlyList`).
-- `Link`: `Name`, `Visual` (root visual) or `Visuals` (multiple), optional `Inertial` (unused).
-- `VisualElement`: `Name`, `Geometry`, `MaterialName`, `LocalTransform` (row-major `Matrix4x4`), optional `Visible`.
-- `Joint`: `Name`, `Type`, `ParentLink`, `ChildLink`, `Origin` (`Matrix4x4`), `Axis`, `Limits`, `Mimic`.
-  - `JointType`: `Revolute/Continuous/Prismatic/Fixed/Planar/Floating`.
+- `RobotDescription`: `Name` (`<robot name>`), `Links` / `Joints` (`List`, mutable), `RootLinks` (computed: every link no joint uses as a child) and `FindLink(name)`.
+- `Link`: `Name`, `VisualElements` (`List<VisualElement>`; a URDF link may carry several visuals).
+- `VisualElement`: `LocalTransform` (row-major `Matrix4x4`), `Geometry`, optional `Material` (`MaterialElement?`; null = the rendering layer's default appearance).
+- `MaterialElement`: `Name`, `Color` (`Vector4?`), `TextureFile` (the raw reference string).
+- `Joint`: `Name`, `Type`, `ParentLinkName`, `ChildLinkName`, `Origin` (`Matrix4x4`), `Axis`.
+  - `JointType`: `Fixed/Revolute/Continuous/Prismatic`. URDF `planar` / `floating` are not part of the model, and `limit` / `mimic` / `inertial` / `collision` are not parsed either — visualization only.
   - A joint is "given a joint value → child link's transform relative to the parent link". Revolute/Continuous rotate around `Axis`; Prismatic translates along `Axis`; Fixed has no DOF.
-- `Geometry` base:
+- `GeometryElement` base (a polymorphic record union; the pose lives on `VisualElement`, not here):
   - `BoxGeometry(Vector3 Size)`
   - `SphereGeometry(float Radius)`
   - `CylinderGeometry(float Radius, float Length)` — axis along +Z

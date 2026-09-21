@@ -90,7 +90,8 @@ float spin = 0;
 marker.AddUpdate((go, dt) =>
     go.Transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, spin += (float)dt));
 
-// Each update: drive joints, run behaviors / update the scene (background thread), then Rendering on the render thread
+// Per frame: drive joints, run behaviors / update the scene, then render — update and render share one
+// frame-loop thread, and SceneGraph.Add/Remove may also be called from any other thread (queued until then)
 scene.Update(deltaTime);
 ```
 
@@ -166,7 +167,7 @@ Fully split into Chinese / English, per module **and** for this index itself —
 - **Coordinates**: right-handed world, **Z-up**; camera up = +Z; primitive rotation axes along +Z (URDF/ROS semantics).
 - **Units**: lengths in meters; angles / joint values in radians; colors as `Vector4` RGBA with components in `[0,1]`.
 - **Render data**: `MeshData` / `MaterialData` are pure-CPU data, buildable on any thread; GPU resources are instantiated & cached by the backend on the render thread.
-- **Threading**: scene mutation and `SceneGraph.Update` run on the update thread; `Render` runs only on the render thread; `Logger` is available on any thread.
+- **Threading**: `Update` and `Render` share one frame-loop thread (they are the scene's frame boundaries); `SceneGraph.Add` / `Remove` may be called from **any** thread — off the owner thread they are queued and commit at the next frame boundary, so a running scene can keep growing; `Logger` is available on any thread.
 - **Dependency direction**: host → `OpenGL`/`Robot` → `Core`; `Core` never references `Robot` / `OpenGL` / any UI framework.
 
 ## 7. Roadmap
