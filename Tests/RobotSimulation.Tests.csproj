@@ -10,7 +10,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="coverlet.collector" Version="6.0.0"/>
+        <!-- Coverage is collected through the VSTest data collector, so nothing in the libraries depends on
+             this package; it is pinned for the sake of the dependency scan. 6.0.0 embeds Newtonsoft.Json
+             9.0.1 in its build/netstandard1.0 folder (assembly version 9.0.0.0), below the 13.0.1 fix line for
+             CVE-2024-21907 (JsonConvert.DeserializeObject overflows the stack on crafted data, CVSS 7.5), which
+             is why Mend/Qodana reports the package as vulnerable. 6.0.1 bundles no Newtonsoft.Json at all and
+             6.0.4 embeds 13.0.3. -->
+        <PackageReference Include="coverlet.collector" Version="6.0.4"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0"/>
         <PackageReference Include="xunit" Version="2.5.3"/>
         <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3"/>
