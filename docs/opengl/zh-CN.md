@@ -47,7 +47,7 @@ public static class GraphicsFactory
 - 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。超出上限的可见灯会被丢弃（着色器的 uniform 数组就这么宽），并在**溢出期间记一次** `Logger.Warning`（场景重新装得下之后自动复位，下次溢出会再报），所以「运行时往场景里加灯」不会变成静默少光。
 - `HighlightBlend = 0.30f`：高亮混合系数。
 - `FrameStats Stats`：帧时序统计（`Fps` / 最近帧与平滑帧耗时 / `FrameCount`），由两次 `Render` 调用间隔经指数滑动平均得到；在渲染线程更新。
-- 每帧开头的缓存清扫：GPU 资源缓存按帧打戳，连续 240 帧未被任何节点用到的条目会被释放——这样替换某个对象的数据（或把它移出场景）不会把它旧的 GPU 缓冲一直留到渲染器销毁；点云绘制前先 `PointMesh.Sync(data)` 拉取同步，修订号未变则完全不做任何上传。
+- 每帧开头的缓存清扫：GPU 资源缓存按帧打戳，连续 240 帧未被任何节点用到的条目会被释放——这样替换某个对象的数据（或把它移出场景）不会把它旧的 GPU 缓冲一直留到渲染器销毁；点云绘制前先 `PointMesh.Sync(data)` 拉取同步，网格绘制前先 `Mesh.Sync(MeshData)`，修订号未变则完全不做任何上传。
 - 出于安全，`Render` 从渲染线程调用；`_disposed` 后会抛 `ObjectDisposedException`。它同时是场景的**帧边界**：先调用 `SceneGraph.ApplyPendingChanges()`，把其它线程排队的 `Add` / `Remove`（以及重挂）合入 `Roots` / `Lights` 之后才开始遍历——所以宿主可以一边渲染一边从 worker 线程往场景里加对象（最迟下一帧可见），而渲染遍历永远看不到「枚举中被改」。队列为空时这次调用立刻返回（连锁都不取），所以 `Update` 之后再来一次不会白花时间。**帧边界只属于场景属主线程**：渲染线程必须就是它（宿主在帧循环里 `new SceneGraph()` 即满足），或者由宿主在开跑前用 `SceneGraph.ClaimOwnership()` 交接过去；否则 `Render` 会抛 `InvalidOperationException`——渲染线程与「允许写 `Roots` 的线程」必须永远是同一个，这正是渲染遍历看不到列表被改的前提。
 
 构造函数需要 `GraphicsContext`（设备层），宿主经 `GraphicsFactory.Create(gl)` 得到。
@@ -60,7 +60,7 @@ public static class GraphicsFactory
 
 | 类型 | 说明 |
 |---|---|
-| `Mesh` | GPU 网格（VAO/VBO/EBO）；顶点布局由 `VertexLayout` 定义；`Draw()` 以三角形列表绘制 |
+| `Mesh` | GPU 网格（VAO/VBO/EBO）；顶点布局由 `VertexLayout` 定义；`Sync(MeshData)` 按修订号增量：未变则什么都不做，变了用 `BufferSubData` 覆盖已分配缓冲、几何超出容量才 `BufferData` 重建（`DynamicDraw`）；`Draw()` 以三角形列表绘制 |
 | `LineMesh` | GPU 线段缓冲（`GL_LINES`），对应 `LineData`；可选逐顶点颜色 |
 | `PointMesh` | GPU 点缓冲（`GL_POINTS`），对应 `PointCloud2Data`；可选逐顶点颜色，点尺寸为 uniform；`Sync(data)` 按修订号增量上传（只对变更槽位 `BufferSubData`，仅在容量变化时重建缓冲），环形折返时 `Draw()` 最多两次 `DrawArrays` |
 | `Material` | GPU 材质：持有着色器与已上传纹理；`Apply(MaterialData)` 写入外观参数 |

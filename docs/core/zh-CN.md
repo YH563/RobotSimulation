@@ -196,9 +196,71 @@ ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述�
 - `LoadedModel`：`FilePath`、`Meshes`（`IReadOnlyList<LoadedMesh>`）。`LoadedMesh`：`Name`、`MeshData`、`MaterialData`。
 - 原生库：Assimp 二进制随 `Silk.NET.Assimp` 包按 RID 分发，宿主无需安装（早先基于 `AssimpNet` 的实现在 Linux 上需要 `libdl.so` 兼容链接，该补丁连同其引导类已随迁移删除）。但绑定本身只按裸名走操作系统搜索路径，找不到应用旁边的 `runtimes/<rid>/native` 副本，因此 `AssimpModelLoader` 在取函数表之前先按绝对路径映射这份副本 —— 宿主依旧无需任何准备。
 
+### 网格数据 `MeshData`
+纯 CPU 三角网格：顶点属性按并行数组存储（`Positions` / `Normals` / `Uvs` / `Tangents`）加索引，与 GPU/OpenGL 解耦。`ToInterleavedArray()` 导出后端要的交错浮点（pos3 | uv2 | normal3 | tangent3，布局见 `VertexLayout`），`ToIndexArray()` 导出索引。
+
+| 成员 | 说明 |
+|---|---|
+| `VertexCount` / `TriangleCount` / `IsEmpty` | 顶点数 / 三角形数 / 是否为空 |
+| `Positions` / `Normals` / `Uvs` / `Tangents` / `Indices` | 并行属性与索引（只读） |
+| `Revision` | 内容修订号，每次改动自增；后端据此决定是否重传（点云 `Revision` 的网格对应物） |
+
+方法：逐条构建用 `AddVertex(position, normal, uv, tangent)` / `AddTriangle(a, b, c)`；批量/外部入口用 `SetGeometry(ReadOnlySpan<float> interleaved, ReadOnlySpan<uint> indices)`——按顶点布局解码后**整块替换**全部几何，校验顶点 stride、索引数（3 的倍数）与索引范围；另有 `Clear()`、`ToInterleavedArray()` / `ToIndexArray()`、`ComputeBounds()`。
+
 ---
 
-## 3. Rendering / 渲染抽象与数据
+## 3. 外部写入协议：增量网格（Sink）
+
+> 本节约定外部重建后端与库之间**消息的内容与语义**。协议是传输无关的纯数据；同进程对象、共享内存视图、解码后的网络消息都产出同一组类型，具体传输（帧头 / 版本 / ROS2 桥接）属后续独立工作。
+
+**定位**：重建由后端完成，库只负责「收到整块网格 → 增量换网格 → 画出来」。后端每批只发「哪些块变了」，每块**整块替换**，不发逐三角形增量。按块而非按三角形，是为了让 marching cubes 一类的局部重三角化天然局限在块内，同时把每次 GPU 上传控制在块级别。
+
+**术语**
+- **块（Chunk）**：世界空间中固定的轴对齐区域（如 16³ 体素）。由稳定 `ChunkId` 标识，同一 id 永远对应同一块、同一个 `ChunkedMesh` 节点。
+- **整块替换**：一次更新携带该块的完整几何，块内旧几何整体废弃；不做逐三角形增量。
+
+**消息模型**
+
+`MeshChunkUpdate`（`Core.Geometry`，readonly struct）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ChunkId` | `long` | 稳定标识；同 id 即同块 |
+| `Kind` | `Upsert \| Remove` | 更新或删除；`Remove` 不带缓冲 |
+| `Origin` | `Vector3` | 块原点（世界坐标）；顶点写成块局部坐标以保精度 |
+| `Vertices` | 交错 float32 | pos3 \| uv2 \| normal3 \| tangent3，每顶点 11 float = 44 字节，与 `VertexLayout` 一致 |
+| `Indices` | `uint32[]` | 三角形列表，每 3 个一组，CCW 朝外 |
+| `Bounds` | `(Vector3 Min, Vector3 Max)?` | 可选，供剔除/拾取；缺省时由顶点计算 |
+| `Revision` | `long?` | 可选，块级单调版本；用于丢弃乱序的旧更新 |
+
+构造：`new MeshChunkUpdate(chunkId, origin, vertices, indices, revision = null, bounds = null)`；删除用静态 `MeshChunkUpdate.Remove(chunkId)`。构造即校验顶点数组为整顶点、索引数为 3 的倍数（索引范围在应用时由 `MeshData.SetGeometry` 校验）。
+
+`MeshChunkBatch`：一次交接的一批 `MeshChunkUpdate`（`new MeshChunkBatch(ReadOnlyMemory<MeshChunkUpdate>)`）。同一批内同一 `ChunkId` 以最后一次为准、按顺序施加。
+
+**坐标与单位**：右手系、**Z-up**、米（与库一致）。顶点为块局部坐标，`Origin` 作为节点 `Transform.Position`，朝向默认单位（后续可扩展 `Rotation`）。重建不使用 `uv` / `tangent` 时可填 0；`normal` 必须正确，光照依赖它。
+
+**顶点布局（字节偏移）**：0 `pos.x`、4 `pos.y`、8 `pos.z`、12 `uv.u`、16 `uv.v`、20 `n.x`、24 `n.y`、28 `n.z`、32 `t.x`、36 `t.y`、40 `t.z`，共 44 字节。
+
+**顺序与幂等**：更新可乱序、可来自多线程。带 `Revision` 时按块丢弃旧值；否则帧边界内按「后到覆盖先到」合并。对不存在的块 `Remove` 是空操作；`Upsert → Remove → Upsert` 的最终状态是最后一次操作。
+
+**库侧类型与应用**
+- `ChunkedMesh : GameObject`（`Core.Scene`）：单块的场景节点，暴露 `ChunkId`、`Mesh`（整生命周期复用的 `MeshData`）、`AppliedRevision`，以及 `Apply(in MeshChunkUpdate)`（原地换几何并更新 `Origin`，返回是否真的变了——旧修订被丢弃时返回 false）。
+- `MeshSink`（`Core.Scene`）：收发端。`Push(in MeshChunkUpdate)` / `Push(in MeshChunkBatch)` 任意线程可调；`Apply()` **属主线程**调用，排空队列、按 id 建/换/删节点，返回应用条数（陈旧修订与未知块的删除不计入）；另有 `PendingCount`、`ChunkCount`、`TryGetChunk`、`Clear`。
+- 宿主在帧循环里、渲染前调用一次 `sink.Apply()`（与 `scene.ApplyPendingChanges()` 并列）；Sink 不属于 `SceneGraph` 本身。
+
+1. 后端线程 `Push`，数据一经发布即不再修改（缓冲不可再改）。
+2. `Apply()` 排空队列：`Upsert` 查找或创建节点与**稳定复用的 `MeshData`**，整块替换几何并更新 `Origin`；`Remove` 摘除节点。
+3. 渲染器绘制时调用 `Mesh.Sync(MeshData)`（`OpenGL`）：`Revision` 未变则什么都不做；变了就用 `BufferSubData` 覆盖已分配的缓冲，几何超出容量才用 `BufferData` 重建（`DynamicDraw`）。
+4. **身份必须稳定**：每个块只维护一个 `MeshData` / 节点，不要每次更新都换新对象——渲染器按数据引用缓存 GPU 资源，逐帧换新会不断分配/回收（清扫见 `Renderer` 的帧戳回收）。
+5. **回收**：后端对自己地图里消失的块发 `Remove`；渲染器另按空闲帧数上限释放长期未用的 GPU 缓冲。
+
+**并发**：`Push` 只碰一个 `ConcurrentQueue`；`Apply`（含节点 `Add` / `Remove`）只在属主线程，非属主线程调用抛 `InvalidOperationException`。节点的创建/删除因此在属主线程上立即生效，块内几何替换走 `MeshData.Revision` 的「写完 → 发布 → 再读」交接（与 `PointCloud2Data` 同源）。
+
+**版本**：版本与帧头归具体传输层（同进程对象无需版本；共享内存 / 网络需自带），纯数据消息本身不带版本字段。
+
+---
+
+## 4. Rendering / 渲染抽象与数据
 
 ### 接口 / Interfaces
 - `IRenderContext : IDisposable`：`event Action<int,int>? Resized`、`void Resize(int width, int height)`、`void Clear(Vector4 clearColor, bool clearDepth = true)`、`GraphicsDeviceInfo DeviceInfo`。
@@ -255,7 +317,7 @@ CPU 侧贴图引用，只描述「哪个文件、何种语义」，不持有 GPU
 
 ---
 
-## 4. Utils / 工具
+## 5. Utils / 工具
 
 | 类型 | 说明 |
 |---|---|
@@ -265,7 +327,7 @@ CPU 侧贴图引用，只描述「哪个文件、何种语义」，不持有 GPU
 
 ---
 
-## 5. 反例 / Anti-patterns
+## 6. 反例 / Anti-patterns
 
 | 反例 | 原因 |
 |---|---|

@@ -534,6 +534,10 @@ public sealed class Renderer : IRenderer
         Mesh mesh = GetOrCreateMesh(node.MeshData!);
         Material material = GetOrCreateMaterial(node.MaterialData!);
 
+        // Pull the current geometry before drawing: a whole-chunk replacement only re-uploads the chunks
+        // whose MeshData.Revision changed since the last frame (Sync is a no-op otherwise).
+        mesh.Sync(node.MeshData!);
+
         // Render state bits: double-sided (cull off) / wireframe, set once before drawing.
         ApplyRenderState(node.MaterialData!);
 
@@ -606,7 +610,7 @@ public sealed class Renderer : IRenderer
     }
 
     private Mesh GetOrCreateMesh(MeshData data)
-        => GetOrCreate(_meshCache, data, () => new Mesh(_gl, data.ToInterleavedArray(), data.ToIndexArray()));
+        => GetOrCreate(_meshCache, data, () => new Mesh(_gl, data));
 
     private Material GetOrCreateMaterial(MaterialData data)
     {

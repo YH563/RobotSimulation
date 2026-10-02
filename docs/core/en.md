@@ -196,9 +196,71 @@ Load point clouds from file: static `Load(string path, string? frameId = null)` 
 - `LoadedModel`: `FilePath`, `Meshes` (`IReadOnlyList<LoadedMesh>`). `LoadedMesh`: `Name`, `MeshData`, `MaterialData`.
 - **Native library**: the Assimp binaries ship per-RID inside the `Silk.NET.Assimp` package, so a host has nothing to install (and, unlike the earlier `AssimpNet`-based implementation, no `libdl.so` compatibility link is needed). The binding itself only looks the library up by bare name on the OS search path, which misses the `runtimes/<rid>/native` copy sitting next to the application, so `AssimpModelLoader` maps that copy by absolute path before asking for its function table — a host still has nothing to prepare.
 
+### Mesh data `MeshData`
+A pure CPU triangle mesh: vertex attributes in parallel arrays (`Positions` / `Normals` / `Uvs` / `Tangents`) plus indices, decoupled from GPU/OpenGL. `ToInterleavedArray()` exports the interleaved floats the backend wants (pos3 | uv2 | normal3 | tangent3, layout defined by `VertexLayout`) and `ToIndexArray()` exports the indices.
+
+| Member | Notes |
+|---|---|
+| `VertexCount` / `TriangleCount` / `IsEmpty` | Vertex count / triangle count / whether empty |
+| `Positions` / `Normals` / `Uvs` / `Tangents` / `Indices` | The parallel attributes and indices (read-only) |
+| `Revision` | Content revision, incremented by every change; the backend uses it to decide whether to re-upload (the mesh counterpart of a point cloud's `Revision`) |
+
+Methods: build one at a time with `AddVertex(position, normal, uv, tangent)` / `AddTriangle(a, b, c)`; the bulk/external entry point is `SetGeometry(ReadOnlySpan<float> interleaved, ReadOnlySpan<uint> indices)` — it decodes by the vertex layout and **replaces the whole geometry**, validating the vertex stride, the index count (multiple of 3) and the index range; plus `Clear()`, `ToInterleavedArray()` / `ToIndexArray()`, `ComputeBounds()`.
+
 ---
 
-## 3. Rendering / Abstraction & data
+## 3. External write protocol: incremental meshes (Sink)
+
+> This section fixes the **content and semantics of the messages** between an external reconstruction backend and the library. The protocol is transport-agnostic pure data: in-process objects, shared-memory views and decoded network messages all produce the same types, while the concrete transport (framing, versioning, a ROS2 bridge) is separate follow-up work.
+
+**Scope**: reconstruction happens in the backend; the library only "receives whole-chunk meshes → swaps them incrementally → draws them". Each batch the backend sends only *which chunks changed*, and every chunk is a **full replacement** — never a per-triangle delta. Chunk granularity (rather than triangle granularity) keeps marching-cubes-style local re-triangulation inside a chunk and keeps every GPU upload at chunk size.
+
+**Terms**
+- **Chunk**: a fixed, axis-aligned region of world space (e.g. 16³ voxels), identified by a stable `ChunkId`; the same id always means the same region and the same `ChunkedMesh` node.
+- **Full replacement**: one update carries the chunk's complete geometry; the chunk's previous geometry is discarded wholesale. No per-triangle delta.
+
+**Message model**
+
+`MeshChunkUpdate` (`Core.Geometry`, a readonly struct):
+
+| Field | Type | Notes |
+|---|---|---|
+| `ChunkId` | `long` | Stable identity; same id = same chunk |
+| `Kind` | `Upsert \| Remove` | Update or delete; `Remove` carries no buffers |
+| `Origin` | `Vector3` | Chunk origin (world space); vertices are chunk-local, which preserves float precision |
+| `Vertices` | interleaved float32 | pos3 \| uv2 \| normal3 \| tangent3, 11 floats = 44 bytes per vertex, matching `VertexLayout` |
+| `Indices` | `uint32[]` | Triangle list, three per triangle, CCW facing outward |
+| `Bounds` | `(Vector3 Min, Vector3 Max)?` | Optional, for culling/picking; computed from the vertices when absent |
+| `Revision` | `long?` | Optional, monotonic per-chunk version; lets the receiver drop out-of-order updates |
+
+Construction: `new MeshChunkUpdate(chunkId, origin, vertices, indices, revision = null, bounds = null)`; removal uses the static `MeshChunkUpdate.Remove(chunkId)`. The constructor already checks that the vertex array is a whole number of vertices and the index count a multiple of 3 (index range is checked when applied, by `MeshData.SetGeometry`).
+
+`MeshChunkBatch`: the set of `MeshChunkUpdate`s handed over at once (`new MeshChunkBatch(ReadOnlyMemory<MeshChunkUpdate>)`). Within a batch, later updates of the same `ChunkId` win and are applied in order.
+
+**Coordinates and units**: right-handed, **Z-up**, meters (as everywhere in the library). Vertices are chunk-local; `Origin` becomes the node's `Transform.Position`, orientation defaults to identity (a `Rotation` field may be added later). `uv` / `tangent` may be zero when reconstruction does not use them; `normal` must be correct, since lighting depends on it.
+
+**Vertex layout (byte offsets)**: 0 `pos.x`, 4 `pos.y`, 8 `pos.z`, 12 `uv.u`, 16 `uv.v`, 20 `n.x`, 24 `n.y`, 28 `n.z`, 32 `t.x`, 36 `t.y`, 40 `t.z` — 44 bytes total.
+
+**Ordering and idempotence**: updates may arrive out of order and from any thread. With `Revision`, older values are dropped per chunk; otherwise the frame boundary merges them last-write-wins. `Remove` on a chunk that does not exist is a no-op; the final state of `Upsert → Remove → Upsert` is the last operation.
+
+**Library-side types and application**
+- `ChunkedMesh : GameObject` (`Core.Scene`): the per-chunk scene node. Exposes `ChunkId`, `Mesh` (the `MeshData` reused for the node's whole lifetime), `AppliedRevision`, and `Apply(in MeshChunkUpdate)` (swaps the geometry in place and updates `Origin`, returning whether anything actually changed — false when the update was stale).
+- `MeshSink` (`Core.Scene`): the receiving end. `Push(in MeshChunkUpdate)` / `Push(in MeshChunkBatch)` may be called from any thread; `Apply()` must run on the owner thread, drains the queue, creates/replaces/removes nodes by id, and returns how many updates were applied (stale revisions and removes of unknown chunks do not count); it also exposes `PendingCount`, `ChunkCount`, `TryGetChunk`, `Clear`.
+- The host calls `sink.Apply()` once per frame, before rendering (alongside `scene.ApplyPendingChanges()`); the sink is not part of `SceneGraph` itself.
+
+1. The backend thread calls `Push`; once published, the data is not modified again (its buffers must not change).
+2. `Apply()` drains the queue: an `Upsert` finds or creates that chunk's node and its **stably reused `MeshData`**, replaces the whole geometry, and updates `Origin`; a `Remove` detaches the node.
+3. On draw, the renderer calls `Mesh.Sync(MeshData)` (`OpenGL`): a no-op while `Revision` is unchanged; otherwise it overwrites the allocated buffers with `BufferSubData`, reallocating with `BufferData` (`DynamicDraw`) only when the geometry outgrows them.
+4. **Identity must stay stable**: keep exactly one `MeshData` / node per chunk; do not hand over a new object per update. The renderer caches GPU resources by data reference, so replacing it every frame would allocate and release on every frame (the frame-stamped sweep in `Renderer` softens but does not fix that).
+5. **Eviction**: the backend sends `Remove` for chunks that leave its map; the renderer additionally releases GPU buffers unused for longer than its idle-frame cap.
+
+**Concurrency**: `Push` only touches a `ConcurrentQueue`; `Apply` (including node `Add` / `Remove`) runs on the owner thread only and throws `InvalidOperationException` elsewhere. Node creation/removal therefore takes effect immediately on the owner thread, while replacing a chunk's geometry goes through `MeshData.Revision` — the same "write → publish → read" hand-off as `PointCloud2Data`.
+
+**Versioning**: versioning and framing belong to the concrete transport (in-process objects need none; shared memory / network must carry their own); the pure-data message itself has no version field.
+
+---
+
+## 4. Rendering / Abstraction & data
 
 ### Interfaces
 - `IRenderContext : IDisposable`: `event Action<int,int>? Resized`, `void Resize(int width, int height)`, `void Clear(Vector4 clearColor, bool clearDepth = true)`, `GraphicsDeviceInfo DeviceInfo`.
@@ -255,7 +317,7 @@ CPU-side texture reference describing only "which file, what semantics", holding
 
 ---
 
-## 4. Utils
+## 5. Utils
 
 | Type | Notes |
 |---|---|
@@ -265,7 +327,7 @@ CPU-side texture reference describing only "which file, what semantics", holding
 
 ---
 
-## 5. Anti-patterns
+## 6. Anti-patterns
 
 | Anti-pattern | Reason |
 |---|---|

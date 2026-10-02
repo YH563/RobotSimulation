@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Numerics;
 
@@ -16,12 +17,23 @@ public sealed class MeshData
     private readonly List<Vector2> _uvs = new();
     private readonly List<Vector3> _tangents = new();
     private readonly List<uint> _indices = new();
+    private long _revision;
 
     /// <summary>Number of vertices (every parallel attribute array below has exactly this length).</summary>
     public int VertexCount => _positions.Count;
 
     /// <summary>Number of triangles (index count / 3).</summary>
     public int TriangleCount => _indices.Count / 3;
+
+    /// <summary>Whether the mesh carries no geometry at all.</summary>
+    public bool IsEmpty => _positions.Count == 0 && _indices.Count == 0;
+
+    /// <summary>
+    /// Monotonic content revision, incremented by every mutation (vertex/triangle append, whole-geometry
+    /// replacement, clear). A render backend compares it with the revision it last uploaded to decide whether
+    /// it has to touch the GPU buffers at all — the mesh-level counterpart of <see cref="PointCloud2Data.Revision"/>.
+    /// </summary>
+    public long Revision => _revision;
 
     /// <summary>Vertex positions, in local model space.</summary>
     public IReadOnlyList<Vector3> Positions => _positions;
@@ -46,6 +58,7 @@ public sealed class MeshData
         _normals.Add(normal);
         _uvs.Add(uv);
         _tangents.Add(tangent);
+        _revision++;
         return index;
     }
 
@@ -55,6 +68,7 @@ public sealed class MeshData
         _indices.Add(a);
         _indices.Add(b);
         _indices.Add(c);
+        _revision++;
     }
 
     /// <summary>
@@ -87,6 +101,75 @@ public sealed class MeshData
 
     /// <summary>Returns a copy of the index buffer.</summary>
     public uint[] ToIndexArray() => _indices.ToArray();
+
+    /// <summary>
+    /// Replaces the whole geometry with vertices laid out in the <see cref="VertexLayout"/> interleaved
+    /// format (pos3 | uv2 | normal3 | tangent3) and a triangle-list index buffer. This is the bulk entry
+    /// point an external producer (a reconstruction backend) uses: it is the inverse of
+    /// <see cref="ToInterleavedArray"/> and the mesh counterpart of "replace the whole chunk".
+    /// </summary>
+    /// <param name="interleavedVertices">Vertices, <see cref="VertexLayout.FloatsPerVertex"/> floats each.</param>
+    /// <param name="indices">Triangle indices, three per triangle, each below the vertex count.</param>
+    /// <exception cref="ArgumentException">The vertex array is not a multiple of the vertex stride, the index count is not a multiple of 3, or an index is out of range.</exception>
+    public void SetGeometry(ReadOnlySpan<float> interleavedVertices, ReadOnlySpan<uint> indices)
+    {
+        if (interleavedVertices.Length % VertexLayout.FloatsPerVertex != 0)
+            throw new ArgumentException(
+                $"Vertex array length must be a multiple of {VertexLayout.FloatsPerVertex} (FloatsPerVertex).",
+                nameof(interleavedVertices));
+        if (indices.Length % 3 != 0)
+            throw new ArgumentException("Index count must be a multiple of 3 (a triangle list).", nameof(indices));
+
+        int vertexCount = interleavedVertices.Length / VertexLayout.FloatsPerVertex;
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] >= vertexCount)
+                throw new ArgumentException(
+                    $"Index {indices[i]} at position {i} is outside the {vertexCount} vertex/vertices.",
+                    nameof(indices));
+        }
+
+        _positions.Clear();
+        _normals.Clear();
+        _uvs.Clear();
+        _tangents.Clear();
+        _indices.Clear();
+
+        _positions.EnsureCapacity(vertexCount);
+        _normals.EnsureCapacity(vertexCount);
+        _uvs.EnsureCapacity(vertexCount);
+        _tangents.EnsureCapacity(vertexCount);
+        _indices.EnsureCapacity(indices.Length);
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            int b = i * VertexLayout.FloatsPerVertex;
+            _positions.Add(new Vector3(interleavedVertices[b], interleavedVertices[b + 1], interleavedVertices[b + 2]));
+            _uvs.Add(new Vector2(interleavedVertices[b + 3], interleavedVertices[b + 4]));
+            _normals.Add(new Vector3(interleavedVertices[b + 5], interleavedVertices[b + 6], interleavedVertices[b + 7]));
+            _tangents.Add(new Vector3(interleavedVertices[b + 8], interleavedVertices[b + 9], interleavedVertices[b + 10]));
+        }
+
+        for (int i = 0; i < indices.Length; i++)
+            _indices.Add(indices[i]);
+
+        _revision++;
+    }
+
+    /// <summary>Drops the whole geometry (vertices and indices); a no-op when already empty.</summary>
+    public void Clear()
+    {
+        if (IsEmpty)
+            return;
+
+        _positions.Clear();
+        _normals.Clear();
+        _uvs.Clear();
+        _tangents.Clear();
+        _indices.Clear();
+        _revision++;
+    }
 
     /// <summary>
     /// Computes the local-space axis-aligned bounding box, for use with picking broad-phase.
