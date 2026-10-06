@@ -30,8 +30,8 @@ This document describes the architecture from the perspective of *publishable Nu
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  (test) BareWindowTest / AvaloniaTest — exe, window/input       │
-│          references: Core, Robot, OpenGL (+Avalonia)            │
+│  (test) RobotSimulation.Tests — xunit, windowed visual check    │
+│          references: Core, Robot, OpenGL                        │
 └───────────────┬─────────────────────────────────────────────────┘
                 │
    ┌────────────┴────────────┐
@@ -104,7 +104,7 @@ State/       RobotState (headless FK)
 Device/      GraphicsFactory (static composition root), GraphicsContext (IRenderContext)
 Rendering/   Renderer (IRenderer), RenderPassKind dispatch, lighting/highlight management
 Resources/   Mesh, LineMesh, PointMesh, Material, Texture2D, ShaderProgram, EmbeddedShaders
-Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag (packed as embedded resources)
+Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag, plus Line .geom (packed as embedded resources)
 ```
 
 ---
@@ -193,7 +193,7 @@ producers: scene.Add / scene.Remove            update:  scene.Update(dt)
 1. **Current**: single repo + namespace partitioning; `src/{Core,Robot,OpenGL}` are the future assembly/package boundaries.
 2. **After API stabilizes**: mechanically split into multiple assemblies / NuGet packages per the `core`/`robot`/`opengl` API docs; fill in `PackageId` / `Version` / `readme` metadata. **Already in place**: all three library projects (`Core` / `OpenGL` / `Robot`) set `<GenerateDocumentationFile>`, so `CS1591` (missing XML comment on a public member) is reported by every build and is kept at zero, and `RobotSimulation.*.xml` is emitted alongside each assembly — a package therefore carries its IntelliSense docs automatically.
 3. **Data ingestion**: first wire an external write protocol (Sink) in-process; ROS2 bridge as a separate optional project.
-4. **Test hosts (three host projects)**: bare window, WPF, Avalonia — each with a `RobotViewport`-style control. They prove that the library **can render standalone** in different desktop frameworks and gather relevant tests, as verification only (not published). They share the same `Core`/`Robot`/`OpenGL` chain; the only host difference is "how to obtain `GL` and how to sync the viewport". **Done so far**: `src/BareWindowTest` (no UI framework at all; also the automated smoke test, `--smoke [frames]` → exit code 0/1) and `src/AvaloniaTest` (`RobotViewportControl : OpenGlControlBase`, obtaining `GL` through `GL.GetApi(gl.GetProcAddress)` and drawing into Avalonia's per-control framebuffer); WPF is still pending. Both take the same CLI shape — `--smoke [frames]`, and nothing else. The scene content is deliberately minimal: one URDF robot (`fairino3_v6`), the camera left exactly as `SceneGraph`'s constructor poses it, and a window that offers nothing but orbit and pick-to-highlight — so they are both an end-to-end check and a minimal embedding example to copy. The loaded file name sits in a single constant in each host's source, under that project's own `Assets/` tree, which each project file copies next to its executable. Their console output is therefore line-by-line comparable, which turns the two hosts into a cross-check of each other instead of two separate demos; for swapping in another model (the `Assets/` trees also ship built-in geometry, a community package, all five mesh formats and point-cloud samples) see `docs/testing`.
+4. **Test project**: a single `RobotSimulation.Tests` xunit project under `Tests/` — headless `SceneGraphThreadingTests` plus `BareWindowTests`, a windowed visual check that opens a Silk.NET window, draws a default `SceneGraph` (including curves at different line widths) and returns when the window closes. The standalone bare-window / WPF / Avalonia sample hosts were **removed**: the library ships no runnable app of its own, and embedding a host is left to consumers (see the Avalonia sketch in the README).
 5. **Optional**: to keep a "pure-managed light kernel", move `Silk.NET.Assimp` into a standalone import sub-package.
 
 ---

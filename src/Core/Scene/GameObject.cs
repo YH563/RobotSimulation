@@ -54,6 +54,12 @@ public class GameObject
     public float PointSize { get; set; } = 3f;
 
     /// <summary>
+    /// Rendering width (in pixels) for the Line pass; used by line objects such as <see cref="Curve"/> and the grid.
+    /// The backend expands each segment into a screen-space quad, so the width stays constant on screen.
+    /// </summary>
+    public float LineWidth { get; set; } = 1f;
+
+    /// <summary>
     /// This node's local coordinate axes (child object): when enabled, a small RGB axes set is attached
     /// under its Transform and moves/rotates/scales with it. The set is created with
     /// <see cref="Axes.AlwaysOnTop"/> on, because a frame marker sits inside the mesh it annotates: the

@@ -17,39 +17,58 @@ public class ShaderProgram : IDisposable
     private readonly Dictionary<string, int> _uniformLocations = new();
     private bool _disposed = false;
 
-    /// <summary>Compiles and links a program from GLSL source text.</summary>
+    /// <summary>Compiles and links a program from vertex and fragment GLSL source text.</summary>
     /// <param name="gl">The GL facade this program is created on.</param>
     /// <param name="vertexSrc">Vertex shader source.</param>
     /// <param name="fragmentSrc">Fragment shader source.</param>
-    /// <exception cref="Exception">The vertex or fragment shader failed to compile, or linking failed.</exception>
+    /// <exception cref="Exception">A shader failed to compile, or linking failed.</exception>
     public ShaderProgram(GL gl, string vertexSrc, string fragmentSrc)
+        : this(gl, vertexSrc, null, fragmentSrc)
+    {
+    }
+
+    /// <summary>Compiles and links a program from GLSL source text, with an optional geometry shader stage.</summary>
+    /// <param name="gl">The GL facade this program is created on.</param>
+    /// <param name="vertexSrc">Vertex shader source.</param>
+    /// <param name="geometrySrc">Geometry shader source; null omits the stage.</param>
+    /// <param name="fragmentSrc">Fragment shader source.</param>
+    /// <exception cref="Exception">A shader failed to compile, or linking failed.</exception>
+    public ShaderProgram(GL gl, string vertexSrc, string? geometrySrc, string fragmentSrc)
     {
         _gl = gl;
 
-        // Compile the vertex shader.
-        uint vertex = _gl.CreateShader(ShaderType.VertexShader);
-        _gl.ShaderSource(vertex, vertexSrc);
-        _gl.CompileShader(vertex);
-        CheckShaderError(vertex, "VERTEX");
-
-        // Compile the fragment shader.
-        uint fragment = _gl.CreateShader(ShaderType.FragmentShader);
-        _gl.ShaderSource(fragment, fragmentSrc);
-        _gl.CompileShader(fragment);
-        CheckShaderError(fragment, "FRAGMENT");
+        uint vertex = Compile(ShaderType.VertexShader, vertexSrc, "VERTEX");
+        uint geometry = geometrySrc is null ? 0 : Compile(ShaderType.GeometryShader, geometrySrc, "GEOMETRY");
+        uint fragment = Compile(ShaderType.FragmentShader, fragmentSrc, "FRAGMENT");
 
         // Link the program.
         _handle = _gl.CreateProgram();
         _gl.AttachShader(_handle, vertex);
+        if (geometry != 0)
+            _gl.AttachShader(_handle, geometry);
         _gl.AttachShader(_handle, fragment);
         _gl.LinkProgram(_handle);
         CheckProgramError();
 
         // Clean up the intermediate shader objects.
         _gl.DetachShader(_handle, vertex);
+        if (geometry != 0)
+            _gl.DetachShader(_handle, geometry);
         _gl.DetachShader(_handle, fragment);
         _gl.DeleteShader(vertex);
+        if (geometry != 0)
+            _gl.DeleteShader(geometry);
         _gl.DeleteShader(fragment);
+    }
+
+    /// <summary>Creates, compiles and error-checks one shader stage.</summary>
+    private uint Compile(ShaderType type, string source, string stage)
+    {
+        uint shader = _gl.CreateShader(type);
+        _gl.ShaderSource(shader, source);
+        _gl.CompileShader(shader);
+        CheckShaderError(shader, stage);
+        return shader;
     }
 
     /// <summary>Binds this program as the one subsequent draw calls use.</summary>

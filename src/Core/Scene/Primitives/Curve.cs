@@ -17,7 +17,8 @@ public sealed class Curve : GameObject
     /// <param name="points">The polyline's vertices (fewer than two points clears the line).</param>
     /// <param name="color">Line color; null uses the default orange.</param>
     /// <param name="name">Scene object name (defaults to <c>Curve</c>).</param>
-    public Curve(IEnumerable<Vector3> points, Vector4? color = null, string? name = null)
+    /// <param name="lineWidth">Line width in pixels; see <see cref="GameObject.LineWidth"/>.</param>
+    public Curve(IEnumerable<Vector3> points, Vector4? color = null, string? name = null, float lineWidth = 1f)
         : base(null, null, name ?? nameof(Curve))
     {
         MaterialData = new MaterialData
@@ -25,6 +26,7 @@ public sealed class Curve : GameObject
             PassKind = RenderPassKind.Line,
             BaseColor = color ?? new Vector4(1f, 0.55f, 0.1f, 1f),
         };
+        LineWidth = lineWidth;
         LineData = new LineData();
         SetPoints(points);
     }

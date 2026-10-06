@@ -124,8 +124,8 @@ public sealed class Renderer : IRenderer
         _passShaders = new Dictionary<RenderPassKind, ShaderProgram>();
         foreach (RenderPassKind pass in Enum.GetValues<RenderPassKind>())
         {
-            (string vs, string fs) = EmbeddedShaders.Get(pass);
-            _passShaders[pass] = new ShaderProgram(_gl, vs, fs);
+            (string vs, string? gs, string fs) = EmbeddedShaders.Get(pass);
+            _passShaders[pass] = new ShaderProgram(_gl, vs, gs, fs);
         }
 
         // The point-cloud vertex shader outputs point size via gl_PointSize. This is only effective when
@@ -346,7 +346,7 @@ public sealed class Renderer : IRenderer
                     break;
 
                 case RenderPassKind.Line when node.LineData != null:
-                    DrawLineNode(node, view, projection);
+                    DrawLineNode(node, scene, view, projection);
                     break;
 
                 case RenderPassKind.Point when node.PointData != null:
@@ -561,18 +561,32 @@ public sealed class Renderer : IRenderer
     }
 
     /// <summary>Line pass: unlit lines (grid floor / axes / curves, etc.).</summary>
-    private void DrawLineNode(GameObject node, Matrix4x4 view, Matrix4x4 projection)
+    private void DrawLineNode(GameObject node, SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
     {
         ShaderProgram shader = GetPassShader(RenderPassKind.Line);
         shader.Use();
+
+        (int viewportWidth, int viewportHeight) = _device.ViewportSize;
 
         shader.SetUniform("uModel", node.Transform.GetModelMatrix());
         shader.SetUniform("uView", view);
         shader.SetUniform("uProjection", projection);
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
         shader.SetUniform("uPerVertexColor", node.LineData!.HasPerVertexColors ? 1 : 0);
+        // The geometry shader expands each segment in screen space, so it needs the viewport (for the
+        // pixels -> NDC conversion), the requested line width in pixels, and the near plane it clips
+        // eye-crossing segments against.
+        shader.SetUniform("uViewportSize",
+            new Vector2(MathF.Max(1f, viewportWidth), MathF.Max(1f, viewportHeight)));
+        shader.SetUniform("uLineWidth", MathF.Max(1f, node.LineWidth));
+        shader.SetUniform("uNear", scene.Camera.NearPlane);
 
+        // Each segment becomes a camera-facing quad, so the triangles have no meaningful front/back face:
+        // culling would drop half of them depending on the segment's screen-space direction. Restore the
+        // culling the model pass expects right after.
+        _gl.Disable(EnableCap.CullFace);
         GetOrCreate(_lineCache, node.LineData!, () => new LineMesh(_gl, node.LineData!)).Draw();
+        _gl.Enable(EnableCap.CullFace);
     }
 
     /// <summary>Point pass: unlit point set (point cloud).</summary>

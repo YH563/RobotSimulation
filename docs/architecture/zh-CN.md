@@ -30,8 +30,8 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  (test) BareWindowTest / AvaloniaTest — exe, 窗口/输入, 组装根         │
-│          references: Core, Robot, OpenGL（Avalonia 宿主另加）         │
+│  (test) RobotSimulation.Tests — xunit + 窗口目视检查              │
+│          references: Core, Robot, OpenGL                        │
 └───────────────┬─────────────────────────────────────────────────┘
                 │
    ┌────────────┴────────────┐
@@ -103,7 +103,7 @@ State/       RobotState (headless FK)
 Device/      GraphicsFactory(静态组合根), GraphicsContext(IRenderContext)
 Rendering/   Renderer(IRenderer), RenderPassKind 分发, 灯光/高亮管理
 Resources/   Mesh, LineMesh, PointMesh, Material, Texture2D, ShaderProgram, EmbeddedShaders
-Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag（作为嵌入式资源打包）
+Shaders/     Model/Line/Point/Skybox/Axes 的 .vert/.frag，外加 Line 的 .geom（作为嵌入式资源打包）
 ```
 
 ---
@@ -192,7 +192,7 @@ producers: scene.Add / scene.Remove    update:  scene.Update(dt)
 1. **当前**：单仓库 + 命名空间分区；`src/{Core,Robot,OpenGL}` 即未来程序集/包边界。
 2. **API 稳定后**：按本目录 `core`/`robot`/`opengl` 各 API 文档机械拆分为多个 assembly / NuGet 包；补齐 `PackageId` / `Version` / `readme` 等元数据。**已就位**：三个库工程（`Core` / `OpenGL` / `Robot`）都开了 `<GenerateDocumentationFile>`，因此 `CS1591`（公共成员缺 XML 注释）在构建时会被报出并被保持为零，`RobotSimulation.*.xml` 也已随构建产出——打包后 IntelliSense 文档自动随包。
 3. **数据接入**：先同进程接外部写入协议（Sink）打通；ROS2 桥接作为独立可选工程。
-4. **测试宿主（三宿主测试项目）**：裸窗口、WPF、Avalonia 三个宿主示例/测试项目——每个内置一个 `RobotViewport` 式控件，既证明本库**能在不同桌面框架下独立渲染显示**，也把相关测试收编进去；仅作验证，不随库发布。它们共享同一 `Core`/`Robot`/`OpenGL` 链路，宿主差异只在「如何拿 `GL` 与如何同步视口」。**当前进展**：`src/BareWindowTest`（完全不含 UI 框架；同时是自动化冒烟测试，`--smoke [frames]` → 退出码 0/1）与 `src/AvaloniaTest`（`RobotViewportControl : OpenGlControlBase`，经 `GL.GetApi(gl.GetProcAddress)` 取 `GL`，并画进 Avalonia 按控件下发的帧缓冲）已完成；WPF 待做。两者命令形态一致——只有 `--smoke [frames]` 一个开关。场景内容刻意压到最小：只装**一个 URDF 机器人**（`fairino3_v6`），相机沿用 `SceneGraph` 构造函数摆好的默认位姿，窗口里只有轨道相机与点击高亮——它们既是端到端检查，也是**可照抄的最小嵌入示例**。被加载的文件名写在各自源码里的一个常量中，来自各自的 `Assets/` 目录，由各自工程文件拷到可执行文件旁。因此两者的控制台输出可逐行对比，两个宿主互为交叉校验，而不只是两个独立演示；要换成别的模型（`Assets/` 里另有内置几何、社区包、五种 mesh 格式与点云样例）见 `docs/testing`。
+4. **测试工程**：`Tests/` 下只保留一个 `RobotSimulation.Tests`（xunit）：无头的 `SceneGraphThreadingTests`，以及 `BareWindowTests`——真开一个 Silk.NET 窗口、渲染默认 `SceneGraph`（含不同线宽的曲线）、窗口关闭即返回的目视检查。独立的裸窗口 / WPF / Avalonia 示例宿主已**移除**：本库不再附带可直接运行的程序，宿主嵌入交由使用方自行实现（Avalonia 示例见 README）。
 5. **可选**：为满足「纯托管轻内核」可将 `Silk.NET.Assimp` 下沉为独立导入子包。
 
 ---

@@ -127,6 +127,35 @@ public class BareWindowTests
         box2.Transform.Position = new Vector3(3, 0, 0);
         scene.Add(box1);
         scene.Add(box2);
+
+        AddLineWidthSamples(scene);
+    }
+
+    /// <summary>
+    /// Adds three flat circles around the origin that differ only in <see cref="GameObject.LineWidth"/>
+    /// (1 / 3 / 6 px), so a run shows the line pass expanding each segment to a constant on-screen width.
+    /// </summary>
+    private static void AddLineWidthSamples(SceneGraph scene)
+    {
+        (float Radius, Vector4 Color, float Width)[] samples =
+        {
+            (1.2f, new Vector4(0.95f, 0.35f, 0.25f, 1f), 1f),
+            (1.5f, new Vector4(0.35f, 0.85f, 0.45f, 1f), 3f),
+            (1.8f, new Vector4(0.30f, 0.60f, 1.00f, 1f), 6f),
+        };
+
+        const int segments = 96;
+        foreach ((float radius, Vector4 color, float width) in samples)
+        {
+            var points = new List<Vector3>(segments + 1);
+            for (int i = 0; i <= segments; i++)
+            {
+                float angle = MathF.Tau * i / segments;
+                points.Add(new Vector3(radius * MathF.Cos(angle), radius * MathF.Sin(angle), 0.05f));
+            }
+
+            scene.Add(new Curve(points, color, name: $"line-width-{width:0}", lineWidth: width));
+        }
     }
 
     private static void OnRender(double deltaTime)

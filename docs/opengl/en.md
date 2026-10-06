@@ -61,12 +61,12 @@ These types are backend implementation details; `public` only for same-assembly/
 | Type | Notes |
 |---|---|
 | `Mesh` | GPU mesh (VAO/VBO/EBO); vertex layout defined by `VertexLayout`; `Sync(MeshData)` uploads incrementally by revision (a no-op when unchanged, otherwise `BufferSubData` over the allocated buffers, reallocating via `BufferData`/`DynamicDraw` only when the geometry outgrows them); `Draw()` draws as triangle list |
-| `LineMesh` | GPU line buffer (`GL_LINES`), for `LineData`; optional per-vertex color |
+| `LineMesh` | GPU line buffer (`GL_LINES`), for `LineData`; optional per-vertex color; the width in pixels comes from the node's `LineWidth`, expanded in the geometry shader |
 | `PointMesh` | GPU point buffer (`GL_POINTS`), for `PointCloud2Data`; optional per-vertex color, point size is a uniform; `Sync(data)` uploads incrementally by revision (only the changed slots via `BufferSubData`, the store is rebuilt only when the capacity changes) and `Draw()` issues at most two `DrawArrays` when the ring wraps |
 | `Material` | GPU material: owns shader + uploaded textures; `Apply(MaterialData)` writes appearance params |
 | `Texture2D` | GPU 2D texture: from `TextureReference` (file or memory), sRGB/linear internal format per `TextureColorSpace`; can gen mipmaps |
 | `ShaderProgram` | Shader program + uniform cache; `Use()` / `SetUniform(...)` (multi-overload) |
-| `EmbeddedShaders` | Standard shader catalog: reads each pass's GLSL from embedded resources (Model/Line/Point/Skybox/Axes .vert/.frag) |
+| `EmbeddedShaders` | Standard shader catalog: reads each pass's GLSL from embedded resources (Model/Line/Point/Skybox/Axes `.vert/.frag`; Line also has a `.geom` that expands segments to screen-space quads) |
 
 > Endpoint: shader sources live in this assembly's `Shaders/` directory, packed as embedded resources; `Core` only defines `RenderPassKind`; hosts don't manage shader paths.
 
@@ -77,7 +77,7 @@ These types are backend implementation details; `public` only for same-assembly/
 `OpenGL` treats the **shader pipeline** as a first-class core — customizable like a game engine, but without the weight of one. `Core`/`Robot` are entirely unaware of GLSL; the contract is only `RenderPassKind`. This section separates "already implemented" from "planned direction".
 
 **Already implemented**
-- The standard pipeline is provided by `EmbeddedShaders` and packed with the assembly (Model / Line / Point / Skybox / Axes `.vert/.frag`); hosts don't manage shader paths.
+- The standard pipeline is provided by `EmbeddedShaders` and packed with the assembly (Model / Line / Point / Skybox / Axes `.vert/.frag`, plus the Line `.geom`); hosts don't manage shader paths.
 - `Renderer` compiles all standard pass shaders at startup via `EmbeddedShaders.Get(pass)` (see its ctor; `GetPassShader(pass)` is `internal`).
 - Model node drawing uses `Material.Shader` (currently created by `Renderer` from the standard `_modelShader` in `CreateMaterial`); appearance params are written into uniforms via `Material.Apply(MaterialData)`.
 - Lights (`MaxLights = 8`) and highlight (`HighlightBlend`) are collected by `Renderer` and written into uniform arrays for the model shader.

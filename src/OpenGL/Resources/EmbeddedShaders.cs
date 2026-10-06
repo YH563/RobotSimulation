@@ -8,22 +8,23 @@ namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
 /// Standard shader catalog: the GLSL source files live in this assembly's <c>Shaders/</c> directory
-/// (Model/Line/Point/Skybox/Axes each with a .vert/.frag), distributed as embedded resources with
-/// RobotSimulation.OpenGL. The Core side only agrees on the <see cref="RenderPassKind"/> passes; the
-/// host needs no shader file paths. Edit GLSL directly under <c>Shaders/*.vert|frag</c>.
+/// (Model/Line/Point/Skybox/Axes each with a .vert/.frag; the Line pass also has a .geom that expands
+/// segments to screen-space quads), distributed as embedded resources with RobotSimulation.OpenGL. The
+/// Core side only agrees on the <see cref="RenderPassKind"/> passes; the host needs no shader file
+/// paths. Edit GLSL directly under <c>Shaders/*.vert|geom|frag</c>.
 /// </summary>
 public static class EmbeddedShaders
 {
     private static readonly Assembly Self = typeof(EmbeddedShaders).Assembly;
 
-    /// <summary>Gets the (vertex, fragment) sources for a pass.</summary>
-    public static (string Vertex, string Fragment) Get(RenderPassKind pass) => pass switch
+    /// <summary>Gets the (vertex, geometry, fragment) sources for a pass; geometry is null when the pass has no such stage.</summary>
+    public static (string Vertex, string? Geometry, string Fragment) Get(RenderPassKind pass) => pass switch
     {
-        RenderPassKind.Model => (Read("Model.vert"), Read("Model.frag")),
-        RenderPassKind.Line => (Read("Line.vert"), Read("Line.frag")),
-        RenderPassKind.Point => (Read("Point.vert"), Read("Point.frag")),
-        RenderPassKind.Skybox => (Read("Skybox.vert"), Read("Skybox.frag")),
-        RenderPassKind.Axes => (Read("Axes.vert"), Read("Axes.frag")),
+        RenderPassKind.Model => (Read("Model.vert"), null, Read("Model.frag")),
+        RenderPassKind.Line => (Read("Line.vert"), Read("Line.geom"), Read("Line.frag")),
+        RenderPassKind.Point => (Read("Point.vert"), null, Read("Point.frag")),
+        RenderPassKind.Skybox => (Read("Skybox.vert"), null, Read("Skybox.frag")),
+        RenderPassKind.Axes => (Read("Axes.vert"), null, Read("Axes.frag")),
         _ => throw new ArgumentOutOfRangeException(nameof(pass)),
     };
 
@@ -37,7 +38,7 @@ public static class EmbeddedShaders
         if (resourceName is null)
             throw new FileNotFoundException(
                 $"Embedded shader resource '{suffix}' not found." +
-                "Confirm the .vert/.frag files under RobotSimulation.OpenGL's Shaders/ directory are included as EmbeddedResource.");
+                "Confirm the .vert/.geom/.frag files under RobotSimulation.OpenGL's Shaders/ directory are included as EmbeddedResource.");
 
         using Stream stream = Self.GetManifestResourceStream(resourceName)!;
         using var reader = new StreamReader(stream);

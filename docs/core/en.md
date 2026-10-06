@@ -20,6 +20,7 @@ A scene node. It holds only scene data (Transform, CPU model data, CPU material)
 | `LineData` | `LineData?` | Line segment set (with `RenderPassKind.Line`) |
 | `PointData` | `PointCloud2Data?` | Point cloud (with `RenderPassKind.Point`) |
 | `PointSize` | `float` | Pixel size of the point pass (`GL_POINTS`), default 3 |
+| `LineWidth` | `float` | Pixel width of the line pass (`GL_LINES`), default 1. The backend expands each segment into a screen-space quad so the width is constant on screen |
 | `ShowLocalAxes` | `bool` | Whether to attach local axes (auto sub-object). The set is created with `AlwaysOnTop = true`: the marker annotates a node whose own mesh surrounds it, so it is drawn after the scene and no geometry can bury it |
 | `LocalAxesLength` | `float` | Default local axes length, default 0.3 |
 | `LocalAxes` | `Axes?` | Attached local axes (non-null when enabled; tune it here — `AlwaysOnTop = false` gets the ordinary, occludable set back) |

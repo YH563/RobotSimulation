@@ -6,17 +6,14 @@ A self-contained, ROS-free, embeddable **robot 3D-visualization and simulation l
 
 ## 1. Packages
 
-The repo is organized by the boundaries of *future publishable NuGet packages* — a directory is an assembly boundary. Three library assemblies plus the (unpublished) host projects:
+The repo is organized by the boundaries of *future publishable NuGet packages* — a directory is an assembly boundary. Three library assemblies plus the (unpublished) test project:
 
 | Assembly | Responsibility | Depends on |
 |---|---|---|
 | **`RobotSimulation.Core`** | Engine kernel: scene object model (`Scene`), pure-CPU geometry & model import (`Geometry`), render abstraction + material/texture description (`Rendering`), point cloud (`PointCloud2Data`), utils (`Utils`). Zero graphics, zero UI. | `Silk.NET.Assimp`, `Microsoft.Extensions.Logging` |
 | **`RobotSimulation.Robot`** | Robot domain model: URDF / description (`Description`, `Urdf`), headless forward kinematics (`State`), robot `GameObject` tree (`RobotModel`). | `Core` |
 | **`RobotSimulation.OpenGL`** | The only render backend: Silk.NET OpenGL + StbImageSharp meshes / materials / textures / shaders & renderer (`Device`, `Rendering`, `Resources`). | `Core` |
-| *(test) `BareWindowTest`* | Bare-window host test: a minimal Silk.NET window with **no UI framework at all**. Doubles as the automated smoke test (`--smoke [frames]` → exit code 0/1). **Not published**. | `Core`, `Robot`, `OpenGL` |
-| *(test) `AvaloniaTest`* | Avalonia host test: embeds the library in a `RobotViewportControl` (derived from `Avalonia.OpenGL.Controls.OpenGlControlBase`) and prints the GPU / frame-rate / smoke lines to the console with exactly the wording the bare-window host uses. **Not published**. | `Core`, `Robot`, `OpenGL`, `Avalonia` |
-| *(test) `RobotSimulation.Tests`* | xunit checks (`Tests/`): `SceneGraphThreadingTests` covers the scene's threading contract (the owner is claimed once, cross-thread `Add` / `Remove` and `Transform.Parent` queue up and commit at a frame boundary, the queue cap and its drop counter), plus `BareWindowTests`, a visual check that really opens a window. **Not published**. | `Core`, `Robot`, `OpenGL` |
-| *(data) `BareWindowTest/Assets`, `AvaloniaTest/Assets`* | Test data of each host test: one `Assets/` tree per project, copied next to that project's executable by its `.csproj`. Each host loads the **single URDF** named in its own source (`Models/fairino3_v6/`); the trees also carry ready-to-use samples (`Models/primitives.urdf`, `Models/urdf_tutorial/`, `Models/formats/`, `PointClouds/`) to switch to. No path arguments, no shared folder, no path table. | — |
+| *(test) `RobotSimulation.Tests`* | xunit checks (`Tests/`): `SceneGraphThreadingTests` covers the scene's threading contract (the owner is claimed once, cross-thread `Add` / `Remove` and `Transform.Parent` queue up and commit at a frame boundary, the queue cap and its drop counter), plus `BareWindowTests`, a visual check that really opens a window and draws the scene (its sample scene includes curves with different line widths). **Not published**. | `Core`, `Robot`, `OpenGL` |
 
 > Packaging: the three libraries pack as `RobotSimulation.Core` / `.Robot` / `.OpenGL`. `PackageId`, `Version`, `Authors`, `RepositoryUrl`, `PackageReadmeFile` and symbol packages are configured (`Directory.Build.props` plus each `.csproj`), and every package carries its generated XML documentation file for IntelliSense — `dotnet pack RobotSimulation.sln` produces the three `.nupkg` + `.snupkg`. The **license** is settled too: MIT, declared as the SPDX expression `MIT` in `Directory.Build.props` with a matching `LICENSE` at the repo root that every package also carries — so `dotnet pack` output states its terms on its own.
 
@@ -113,7 +110,7 @@ renderer.Render(scene);                             // per frame
 
 ### 4.4 Embedding in a UI framework (Avalonia example)
 
-The library never creates a window or a GL context, so a UI host only answers two questions: *where does `GL` come from* and *which framebuffer do I draw into*. `src/AvaloniaTest/Controls/RobotViewportControl.cs` is the reference implementation:
+The library never creates a window or a GL context, so a UI host only answers two questions: *where does `GL` come from* and *which framebuffer do I draw into*. An Avalonia embed looks like this:
 
 ```csharp
 public class RobotViewportControl : OpenGlControlBase          // Avalonia hands out a context per control
@@ -136,19 +133,7 @@ public class RobotViewportControl : OpenGlControlBase          // Avalonia hands
 }
 ```
 
-Both runnable host tests ship in this repo. They take **no data arguments at all**: each loads the **single URDF model** named in its own source — `Assets/Models/fairino3_v6/fairino3_v6.urdf`, copied next to the executable by the project file — and writes the same GPU / FPS / smoke lines to the console, so the two runs can be compared line by line:
-
-```bash
-# Either host: render 120 frames, print GPU + FPS, exit 0 — usable as a CI smoke test
-dotnet run --project src/BareWindowTest -- --smoke 120
-dotnet run --project src/AvaloniaTest  -- --smoke 120
-
-# Without --smoke the same command opens the window and runs until it is closed
-dotnet run --project src/AvaloniaTest
-```
-
-One run loads exactly one URDF (`fairino3_v6`); the grid floor, lights and camera pose all come from the library's default `SceneGraph`, its renderer adds the screen-space orientation gizmo in the bottom-right corner, and a click selects through `SceneGraph.PickAndSelect` — the picked object is highlighted and carries its own local axes, drawn on top of the mesh so the model can never hide the frame it annotates, display only: no drag handles exist anywhere in the library, so feedback can never edit a robot's joint-driven poses (the world-origin axes are opt-in).
-The repository also ships further ready-to-use samples in `Assets/` — URDF built-in geometry, the community `urdf_tutorial` package, all five mesh formats, and two RGB point clouds — plus the scripts that regenerate them; swap one in by changing a single constant. See [`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md) for where the data comes from and how to add or download more.
+The library ships no runnable host application. The visual check lives in the test project: `Tests/BareWindowTests.cs` opens a Silk.NET window, renders a default `SceneGraph` (its sample scene includes curves with different line widths), and returns when the window is closed. It needs a display, so the CI test step filters it out.
 
 ## 5. Documentation
 
@@ -160,7 +145,6 @@ Fully split into Chinese / English, per module **and** for this index itself —
 | [`docs/core/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/core/en.md) | `RobotSimulation.Core` public API reference (Scene / Geometry / Rendering / Utils) |
 | [`docs/robot/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/robot/en.md) | `RobotSimulation.Robot` public API reference (RobotModel / Description / Urdf / State) |
 | [`docs/opengl/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/opengl/en.md) | `RobotSimulation.OpenGL` public API + host composition + custom shader pipeline |
-| [`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md) | Test data guide: what the host tests load, where the files come from (incl. regenerating the samples and optional downloads) |
 
 ## 6. Conventions
 
@@ -174,8 +158,8 @@ Fully split into Chinese / English, per module **and** for this index itself —
 
 - [x] Packaging metadata (`PackageId` / version / NuGet metadata / README / license): `Directory.Build.props` plus each `.csproj`, verified with `dotnet pack` — 3 `.nupkg` + 3 `.snupkg`, each carrying its XML docs, the README and a `LICENSE` copy. Pushing to a feed stays a separate, manual step.
 - [ ] `Visualization` display layer (rviz-like Display) and external write protocol (Sink).
-- [ ] Three host samples / test projects: bare window, WPF, Avalonia — one `RobotViewport`-style control each, proving the library *can render standalone* and providing a place to host tests. **In progress**: bare window (`src/BareWindowTest`) ✔ and Avalonia (`src/AvaloniaTest`) ✔; WPF pending.
-- [ ] Unit tests: geometry primitives, ray picking, URDF parsing, `RobotState` FK. **In progress**: `Tests/` (xunit) holds `SceneGraphThreadingTests` — **10 headless checks** over the scene's threading contract (the owner is claimed once, cross-thread `Add` / `Remove` and `Transform.Parent` queue up and commit at a frame boundary, the queue cap and its drop counter, a root leaving `Roots` when it gains a parent) ✔ — plus `BareWindowTests`, a visual / manual check that really opens a window ✔. The earlier 37-check suite (URDF parsing and `IAssetResolver` path resolution, geometry primitives, ray picking, the default `SceneGraph` and its selection contract) went away with the old `src/RobotSimulation.Tests/` directory; "which link a click lands on" is covered today by the Avalonia host's `--smoke` self-check. Shapes / picking / path resolution and `RobotState` FK are still to come.
+- [ ] Three host samples / test projects: bare window, WPF, Avalonia — one `RobotViewport`-style control each, proving the library *can render standalone* and providing a place to host tests. **Descoped**: the standalone host apps were removed; the repo keeps only the `RobotSimulation.Tests` xunit project (with the windowed visual check `BareWindowTests`), so embedding a host is left to consumers.
+- [ ] Unit tests: geometry primitives, ray picking, URDF parsing, `RobotState` FK. **In progress**: `Tests/` (xunit) holds `SceneGraphThreadingTests` — **10 headless checks** over the scene's threading contract (the owner is claimed once, cross-thread `Add` / `Remove` and `Transform.Parent` queue up and commit at a frame boundary, the queue cap and its drop counter, a root leaving `Roots` when it gains a parent) ✔ — plus `BareWindowTests`, a visual / manual check that really opens a window ✔. The earlier 37-check suite (URDF parsing and `IAssetResolver` path resolution, geometry primitives, ray picking, the default `SceneGraph` and its selection contract) went away with the old `src/RobotSimulation.Tests/` directory. Shapes / picking / path resolution and `RobotState` FK are still to come.
 - [ ] (optional) An additional non-Silk render backend.
 
 ---
@@ -185,7 +169,3 @@ Fully split into Chinese / English, per module **and** for this index itself —
 MIT — see [`LICENSE`](https://github.com/YH563/RobotSimulation/blob/master/LICENSE). The three library packages declare it with the SPDX expression `MIT` in
 `Directory.Build.props`, so `dotnet pack` output states its terms without needing a license file inside the
 package; a copy of `LICENSE` is packed alongside the README anyway.
-
-This covers this repository's own source only. Bundled test data keeps its own terms — the `urdf_tutorial`
-sample under `Assets/Models/` is BSD-3-Clause, as recorded in the per-folder READMEs and
-[`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md).

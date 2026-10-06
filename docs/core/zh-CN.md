@@ -20,6 +20,7 @@
 | `LineData` | `LineData?` | 线段集（配合 `RenderPassKind.Line`） |
 | `PointData` | `PointCloud2Data?` | 点云（配合 `RenderPassKind.Point`） |
 | `PointSize` | `float` | 点通道的像素尺寸（`GL_POINTS`），默认 3 |
+| `LineWidth` | `float` | 线通道的像素宽度（`GL_LINES`），默认 1。后端把每条线段扩成屏幕空间四边形，宽度在屏幕上恒定 |
 | `ShowLocalAxes` | `bool` | 是否挂载本节点局部坐标轴（自动子对象）。挂载出来的轴系带 `AlwaysOnTop`：这条标记所标注的节点，网格本身就在它四周，所以它在场景画完之后绘制，任何几何都埋不掉它 |
 | `LocalAxesLength` | `float` | 局部坐标轴默认长度，默认 0.3 |
 | `LocalAxes` | `Axes?` | 已挂载的局部坐标轴（非 null 当启用后；要微调就改这里——把 `AlwaysOnTop` 设回 false 又得到普通、会被遮挡的轴系） |

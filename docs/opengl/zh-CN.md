@@ -61,12 +61,12 @@ public static class GraphicsFactory
 | 类型 | 说明 |
 |---|---|
 | `Mesh` | GPU 网格（VAO/VBO/EBO）；顶点布局由 `VertexLayout` 定义；`Sync(MeshData)` 按修订号增量：未变则什么都不做，变了用 `BufferSubData` 覆盖已分配缓冲、几何超出容量才 `BufferData` 重建（`DynamicDraw`）；`Draw()` 以三角形列表绘制 |
-| `LineMesh` | GPU 线段缓冲（`GL_LINES`），对应 `LineData`；可选逐顶点颜色 |
+| `LineMesh` | GPU 线段缓冲（`GL_LINES`），对应 `LineData`；可选逐顶点颜色；像素宽度来自节点的 `LineWidth`，由几何着色器扩宽 |
 | `PointMesh` | GPU 点缓冲（`GL_POINTS`），对应 `PointCloud2Data`；可选逐顶点颜色，点尺寸为 uniform；`Sync(data)` 按修订号增量上传（只对变更槽位 `BufferSubData`，仅在容量变化时重建缓冲），环形折返时 `Draw()` 最多两次 `DrawArrays` |
 | `Material` | GPU 材质：持有着色器与已上传纹理；`Apply(MaterialData)` 写入外观参数 |
 | `Texture2D` | GPU 二维纹理：从`TextureReference`（文件或内存）创建，按 `TextureColorSpace` 决定 sRGB/线性内格式；可生成 mipmap |
 | `ShaderProgram` | 着色器程序与 uniform 缓存；`Use()` / `SetUniform(...)`（多样式重载） |
-| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes .vert/.frag） |
+| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes `.vert/.frag`；Line 另有 `.geom`，把线段扩成屏幕空间四边形） |
 
 > 端点：着色器源文件位于本程序集 `Shaders/` 目录，作为嵌入式资源打包；`Core` 只约定 `RenderPassKind`，宿主无需管理着色器路径。
 
@@ -77,7 +77,7 @@ public static class GraphicsFactory
 `OpenGL` 把**着色管线**当作核心来对待——像游戏引擎那样可自定义，但又避免整引擎的沉重。`Core`/`Robot` 完全不感知 GLSL，约定只在 `RenderPassKind` 上。本节如实区分「当前已实现」与「规划的扩展方向」。
 
 **当前已实现**
-- 标准管线由 `EmbeddedShaders` 提供并随程序集打包（Model / Line / Point / Skybox / Axes 的 `.vert/.frag`），宿主无需管理着色器文件路径。
+- 标准管线由 `EmbeddedShaders` 提供并随程序集打包（Model / Line / Point / Skybox / Axes 的 `.vert/.frag`，外加 Line 的 `.geom`），宿主无需管理着色器文件路径。
 - `Renderer` 在启动时从 `EmbeddedShaders.Get(pass)` 编译全部标准 pass 着色器（见其构造函数；`GetPassShader(pass)` 为 `internal`）。
 - 模型节点绘制使用 `Material.Shader`（当前由 `Renderer` 以标准 `_modelShader` 创建，见 `CreateMaterial`），材质参数经 `Material.Apply(MaterialData)` 写入 uniform。
 - 灯（`MaxLights = 8`）与高亮（`HighlightBlend`）由 `Renderer` 收集并写入 uniform 数组，供模型着色器消费。

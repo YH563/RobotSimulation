@@ -26,7 +26,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <EmbeddedResource Include="Shaders\**\*.vert;Shaders\**\*.frag" />
+        <EmbeddedResource Include="Shaders\**\*.vert;Shaders\**\*.geom;Shaders\**\*.frag" />
     </ItemGroup>
 
     <!-- The package README and license: one file each for the whole family, taken from the repo root. -->
