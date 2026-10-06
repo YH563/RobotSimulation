@@ -1,0 +1,8 @@
+# generated sample: diffuse colour of the OBJ sample
+newmtl cube_material
+Ka 0.10 0.10 0.10
+Kd 0.90 0.45 0.20
+Ks 0.40 0.40 0.40
+Ns 32.0
+d 1.0
+illum 2

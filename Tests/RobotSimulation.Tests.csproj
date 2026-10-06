@@ -32,4 +32,11 @@
         <Using Include="Xunit"/>
     </ItemGroup>
 
+    <!-- The two sample hosts live under Tests/ too, so exclude their sources from this project's default
+         Compile glob; only the xunit files directly here belong to RobotSimulation.Tests. -->
+    <ItemGroup>
+        <Compile Remove="AvaloniaTest/**/*.cs"/>
+        <Compile Remove="BareWindowTest/**/*.cs"/>
+    </ItemGroup>
+
 </Project>

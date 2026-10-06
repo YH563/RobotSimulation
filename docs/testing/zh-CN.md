@@ -1,0 +1,189 @@
+# 测试数据指南
+
+`Tests/BareWindowTest` 与 `Tests/AvaloniaTest` 是本仓库的端到端检查，同时也是**最小的嵌入示例**：两者各自把**一个 URDF 机器人**装进一个默认场景、渲染出来，并打印一份两个宿主共用的日志。窗口里只有三件事——轨道相机（左键拖拽旋转 / 中键平移 / 右键或滚轮缩放）、点击选中（高亮 + 挂上该部件的自身坐标系——画在几何之上，网格埋不掉它；纯显示不可拖动）、以及库自带的地面网格，右下角还有渲染器绘制的屏幕空间朝向 gizmo（世界坐标轴默认关闭，需要时手动开）。**点击与拖拽以 6 像素为界**：指针在阈值内按下再松开算一次点击，越界才算拖拽。点击**不会移动相机**——宿主先把相机恢复为按下时的姿态快照，再按用户当时看到的那一帧发射拾取射线；否则几像素的手抖就会让「点在这一帧的部件上」变成「射线早已偏到部件之外」。本文只讲这**一个文件**：它放在哪、从哪来、怎么换。
+
+## 1. 数据放在哪里
+
+```
+Tests/BareWindowTest/Assets/        # 会被拷到 …/BareWindowTest/bin/<cfg>/net8.0/ 旁
+Tests/AvaloniaTest/Assets/          # 会被拷到 …/AvaloniaTest/bin/<cfg>/net8.0/ 旁
+├─ Models/
+│  ├─ fairino3_v6/                # ★ 宿主加载的就是这一个：*.urdf + meshes/*.STL
+│  ├─ primitives.urdf             # 备用样例：URDF 内置几何（见 §5）
+│  ├─ urdf_tutorial/              # 备用样例：社区包（ROS），*.urdf + meshes/
+│  ├─ formats/                    # 备用样例：每种 mesh 格式一个立方体
+│  └─ README.md                   # 目录内说明：来源表、目录约定、可选下载
+└─ PointClouds/
+   ├─ rgb_cloud.ply               # 备用样例：彩色立方体，red/green/blue 通道
+   ├─ rgb_cloud.pcd               # 备用样例：彩色螺旋，打包 rgb 通道
+   └─ README.md
+```
+
+两个宿主测试**各存自己的一份**，而不是共享一个目录：这样任一工程都不必访问自己的目录之外，两者也可以各自改动。工程文件把 `Assets\**\*` 拷到可执行文件旁（`PreserveNewest`），宿主再以 `AppContext.BaseDirectory` 解析路径——因此**启动宿主时的工作目录不会影响加载内容**。
+
+这里**没有路径参数，也没有路径表**：源码里的那一个常量（两个宿主中的 `ModelRelativePath`，分别位于 `Tests/BareWindowTest/Program.cs` 与 `Tests/AvaloniaTest/Controls/RobotViewportControl.cs`）**就是**约定本身；`--smoke [frames]` 是两个宿主唯一接受的开关。
+
+## 2. 一次运行加载什么
+
+| 条目（相对 `Assets/`） | 来源 | 覆盖点 |
+| --- | --- | --- |
+| `Models/fairino3_v6/fairino3_v6.urdf` | 本仓库自带 | 真机 6 轴机械臂：完整关节树 + 7 个 STL mesh。它引用的 `package://rus_sim_driver/meshes/…` 同时验证了包名前缀剥离与资源解析（包名与目录名刻意不一致） |
+
+**一个 URDF 就够把整条链路走通**——XML 解析、`package://` 资源解析、STL 导入、link/joint 树、材质与光照——所以宿主只装它一个，代码因此小到可以当范例读。
+
+相机也**不被覆盖**：`SceneGraph` 的构造函数已经摆好了网格地板、灯光和一个可用的相机位姿（世界坐标轴默认关闭），宿主直接沿用；朝向反馈同样无需配置——渲染器会在宿主设定的视口右下角画屏幕空间 gizmo；选择反馈也一样：点击直接交给 `SceneGraph.PickAndSelect`，高亮与该部件自己的坐标轴一次到位（坐标轴画在几何之上，被标注的网格埋不掉它）——那是用来读的标记，不是用来拖的手柄。这本就是本库对嵌入方的承诺——`new SceneGraph()` 之后就是一个能看的场景，不需要任何调参。
+
+`Assets/` 里其余样例数据仍然保留（见 §5），只是**最小示例不加载它们**。
+
+## 3. 怎么运行
+
+```bash
+# 任一宿主：渲染 120 帧、打印 GPU + FPS、退出码 0（失败为 1）
+dotnet run --project Tests/BareWindowTest -- --smoke 120
+dotnet run --project Tests/AvaloniaTest  -- --smoke 120
+
+# 不带任何参数：打开窗口一直运行到关窗（裸窗口宿主按 Esc 关闭）
+dotnet run --project Tests/AvaloniaTest
+```
+
+两个宿主打印**相同的行**，这正是它们能互为交叉校验的原因：
+
+```
+Smoke mode: rendering 120 frame(s), then exiting.
+GPU: Quadro P520/PCIe/SSE2 | vendor: NVIDIA Corporation | GL: 3.3.0 … | GLSL: 3.30 …
+Test data: …/bin/Debug/net8.0/Assets
+Loading model: …/Assets/Models/fairino3_v6/fairino3_v6.urdf
+FPS 43.0 | last 19.21 ms | avg 23.24 ms | frames 29
+Smoke OK: rendered 120 frame(s) with no error.
+```
+
+按构造而言有**两类**行必然不同，它们描述的正是宿主必须自己决定的那件事——如何取得 GL、如何确定视口大小：GL / GLSL 版本（Silk.NET 报 3.3 core，Avalonia 报 4.0），以及每个宿主在 framebuffer 尺寸变化或首次测量时打印的那行 `Viewport:`。其余各行逐字相同；文件缺失只会产生一行 `warn:` 并跳过该条目——运行永远不会因为测试数据失败，所以「只加了一半」的模型是可见的，而不是致命的。
+
+冒烟模式证明的是：GL 上下文能建起来、着色器能编译、mesh 能上传、连续 N 帧无错误，**并且**会在真机的实际 framebuffer 尺寸下跑一次拾取自检（见下方「坐标链」）。它**不**断言画面内容（那需要截图比对），所以最小宿主里没有动画——帧计数来自 `IRenderer.Stats`，不依赖场景里有什么在动。
+
+点击选中会打印命中的 link 名，这是交互链路（屏幕像素 → 世界射线 → 三角形求交 → 高亮 + 该部件自身坐标轴，均为只读）可用的直接证据：
+
+```
+Pick: selected 'shoulder_link:visual0'
+Pick: nothing selected
+```
+
+### 坐标链：光标 → 像素 → 射线
+
+一次点击可信与否，只取决于一个问题的答案：**光标下面是画面里的哪个像素？** 画面被画进**由合成器决定大小的 framebuffer**，而这个尺寸并不总是宿主按自身布局能推算出来的那个。在本仓库 Avalonia 宿主上实测（Avalonia 12、X11，`RenderScaling` 报 `1.00`）：
+
+```
+Viewport: 1157x755 px from framebuffer | control layout 1100x718 at scaling 1.00 = 1100x718 px
+```
+
+控件布局是 1100×718 逻辑单位，而它绘制的表面是 **1157×755 像素**——大 5.2%——合成器会把整张表面铺到控件上。因此按 `Bounds × RenderScaling`（1100×718）推算视口的宿主，既把画面画进比表面更小的矩形，又按那个矩形发射拾取射线：点击位置与光标相差约 5%，在测试场景边缘相当于 **148 毫米**——超过一条 link 直径的两倍——而且**窗口越大误差越大**。因此两个宿主都：
+
+* 从 **GL 实际渲染的 framebuffer** 取视口尺寸（Avalonia 读已绑定 framebuffer 的颜色附着，Silk 读 `IView.FramebufferSize`），只有查询不到时才退回布局／窗口尺寸，并在尺寸变化时打印一行 `Viewport:`；
+* 用**实测比例**（上例为 1.0518 像素 / 逻辑单位）把指针坐标换算为像素，而不是只用显示缩放。
+
+Avalonia 里指针坐标本身**不需要手工换算**：`PointerEventArgs.GetPosition(this)` 已经是控件自身坐标系，因此控件不在窗口原点、或嵌在容器里都自动正确；手工去减偏移才是那个 bug。按下鼠标时会为该次点击打印整条坐标链：
+
+```
+Pointer: control=548.0,413.0 window=548.0,413.0 control-origin=0.0,0.0 bounds=1100x718 scale=1.0521,1.0521 px/unit viewport=1157x755 (framebuffer) pixel=576.5,434.5
+```
+
+其中 `control` 与 `window` 之差必须正好等于 `control-origin`，`pixel` 就是射线将在视口内发射的像素位置。这几个数对不上，就说明该宿主「拾取用的坐标系」与「绘制用的坐标系」不是同一个——这正是冒烟自检要抓的：
+
+```
+Pick check: 15/21 surface samples select their own link, 6 are covered by a nearer link, 0 are missed entirely,
+worst round-trip error 0.00px, viewport 1157x755 px (framebuffer), scale 1.0521,1.0521 px/unit
+(the layout prediction is 1100x718 px, 1.0518× off)
+```
+
+它在 `--smoke` 运行到第 10 帧时执行。每个采样点都是某个 link 可见表面上的点：先投影到画面显示它的那个像素，再按**点击所用的同一套换算**反算回控件／窗口坐标，然后拾取。被更近 link 合法遮挡的采样点只计数、不要求命中自身（自检不是可见性测试）；但射线不能漏掉画面显示有表面的地方，也不能在问某个像素时命中别的像素——自检不通过，整次运行即失败（退出码 1）。
+
+## 4. 换一个模型
+
+1. **把文件放到两个宿主相应 `Assets/Models/` 下**（也可以先只放进你正在试的那一个）。URDF 包用解析器认识的两种布局之一（细则见 `docs/robot/zh-CN.md` §3）：
+   * **① 扁平式**（本仓库样例全是这种，**宿主无需额外参数**）——`.urdf` 直接放在包目录里、mesh 放在与它同级的 `meshes/` 下，以 `package://<任意包名>/meshes/<文件>` 引用；
+   * **② 标准 ROS 式**——`.urdf` 在包根的 `urdf/` 下、mesh 在包根 `meshes/` 下，此时加载要把**包根**传给 `RobotModel.ParseFile` 的 `assetDirectory` 参数（宿主里那个调用需相应传参）。
+   包名只作标识、**不会**去匹配目录名——本仓库的 `fairino3_v6` 里写的其实是 `package://rus_sim_driver/…`。另外**不要**提交 `*.urdf.xacro`（本引擎没有 xacro 展开器）。
+2. **改 `ModelRelativePath`**：`Tests/BareWindowTest/Program.cs` 与 `Tests/AvaloniaTest/Controls/RobotViewportControl.cs` 顶部各一份，保证两个宿主加载同一个文件。
+3. **跑一次宿主**（`--smoke 120`）并读日志：会打印它解析出的绝对路径，缺失的文件会被明确报告而不是静默忽略。
+
+## 5. 备用样例数据（最小宿主不加载）
+
+`Assets/` 里还留着一批**现成可用的样例**，它们覆盖了最小示例之外的代码路径。想验证某一条时，把对应路径填进 §4 的 `ModelRelativePath` 即可：
+
+| 条目（相对 `Assets/`） | 来源 | 覆盖点 |
+| --- | --- | --- |
+| `Models/primitives.urdf` | 为本仓库手写 | URDF 内置几何：`box`、`sphere`、`cylinder`、`capsule`，各带 `<origin xyz rpy>`、机器人级 `<material>`、`<collision>` / `<inertial>` 与固定关节链 |
+| `Models/urdf_tutorial/02-multipleshapes.urdf` | <https://github.com/ros/urdf_tutorial>（BSD-3-Clause） | 社区包：多个由内置几何拼出的 link，外加一个 DAE mesh |
+| `Models/urdf_tutorial/05-visual.urdf` | 同一社区包 | DAE mesh + PNG 贴图（灰度版与彩色版） |
+| `Models/formats/formats.urdf` | 为本仓库生成 | 同一个立方体分别导出为 STL、OBJ+MTL、COLLADA（DAE）、glTF 2.0、PLY（mesh）——一棵树覆盖五种格式 |
+| `PointClouds/rgb_cloud.ply` | 生成（见下） | PLY ascii，独立的 `red`/`green`/`blue`（uchar）通道 |
+| `PointClouds/rgb_cloud.pcd` | 生成（见下） | PCD ascii，打包的 `rgb`（float32）通道 |
+
+点云要在场景里显示需要一个点云对象：`PointCloud.FromFile(path)`，然后 `scene.Add(...)`（最小宿主里已不再这么做，`PointCloud2Data` / `PointCloudIo` 仍在 `Core` 里，也仍在单元级可用）。
+
+`formats/`（五种 mesh 格式的立方体）与 `PointClouds/` 下的两个文件都由为本仓库编写的脚本产生——不需要下载，因此 CI 从不依赖第三方可达。
+
+```bash
+# RGB 点云：彩色立方体（PLY，red/green/blue）与彩色螺旋（PCD，打包 rgb）
+python3 docs/testing/tools/gencloud.py \
+    Tests/BareWindowTest/Assets/PointClouds Tests/AvaloniaTest/Assets/PointClouds
+```
+
+点云样本要验证的是**颜色链路**而不只是文件链路：忽略颜色通道、字节序解错、或按 0..1 而不是 0..255 打包的点云**同样能渲染**，只是渲染成材质单色或全黑。所以判定要看**解码结果**（`PointCloud.FromFile(...)` 返回对象上的 `PointData`：点数与首个点的颜色），而不是截图；两个形状（六个平面 / 连续色相）也让解错颜色一眼可见。
+
+可接受的容器格式（来自 `src/Core/Geometry/PointCloud/PointCloudIo.cs`）：
+
+| 容器 | 支持 | 不支持（直接抛异常） |
+| --- | --- | --- |
+| `.pcd`（PCL） | `DATA ascii`、`DATA binary` | `DATA binary_compressed` |
+| `.ply`（Stanford） | `format ascii`、`format binary_little_endian` | `format binary_big_endian`、`vertex` 上的 list 属性 |
+
+逐点颜色识别 `rgb`、`rgba`、`red`/`green`/`blue`（或 `r`/`g`/`b`）与 `intensity`；都没有时按材质单色绘制。
+
+## 6. 可选下载（永远不是必需）
+
+只有确实需要真实数据时才去取——两个宿主都会把 `Assets/` 拷进输出，所以大文件留在本地、且不进版本库。
+
+* **模型**：`go1_description`，来自 <https://github.com/unitreerobotics/unitree_ros>（`robots/go1_description/`，已是 xacro 展开结果，约 50 个 link、7 个 DAE mesh）；`ur_description` 或 `turtlebot3_description` 可再加带贴图的 DAE 机器人。避免 `*.urdf.xacro` 与 MoveIt 的 `panda_description`（只有 mesh，没有普通 `.urdf`）。
+* **点云**：Stanford 3D Scanning Repository（<https://graphics.stanford.edu/data/3Dscanrep/>）的 `bun_zipper.ply`（35 947 点，ascii，`intensity` 着色）；以及 PCL 数据仓库（<https://github.com/PointCloudLibrary/data>）里可读的 ascii 样本，如 `tutorials/lamppost.pcd`（1 771 点，最小冒烟用例）、`tutorials/ism_train_cat.pcd`、`tutorials/min_cut_segmentation_tutorial.pcd` 与 10 万点的 `biwi_face_database/model.pcd`。该仓库里**大多数其他文件是 `binary_compressed`，本引擎读不了**。
+
+## 7. 为什么两个宿主必须一致
+
+本库的承诺是：各宿主之间**只有**「如何拿到 `GL` 与如何同步视口」不同。把两份日志格式与同一个被加载文件保持一致，就把这个承诺变成了脚本可校验的东西：跑两个宿主、对比输出，唯一可能不同的行只有 GL / GLSL 版本。
+
+```bash
+for f in /tmp/bare.log /tmp/avalonia.log; do
+  grep -E '^      (Smoke|GPU|Test data|Loading|FPS)' "$f" \
+    | sed -E 's#/(src|Tests)/(BareWindowTest|AvaloniaTest)/bin#/bin#; s/^      FPS .*/      FPS <measured>/' > "$f.cmp"
+done
+diff /tmp/bare.log.cmp /tmp/avalonia.log.cmp
+```
+
+FPS 行里的数字本就是每次测量的结果，所以脚本把它归一化掉；剩下的差异应当**只有** GL / GLSL 版本那一行。
+
+---
+
+## 8. 无头检查与目视检查（`Tests/`）
+
+两个宿主证明的是「渲染链路能跑起来」。`Tests/RobotSimulation.Tests.csproj`（xunit，引用 `Core` + `Robot` + `OpenGL`）里放两类补充检查：
+
+| 类 | 覆盖 |
+| --- | --- |
+| `SceneGraphThreadingTests` | 场景的线程契约（10 项无头检查）：属主只声明一次、非属主线程调用帧边界抛异常、跨线程 `Add` / `Remove` 与 `Transform.Parent` 入队并在帧边界提交、队列上限与丢弃计数、根节点随父节点迁出 `Roots` |
+| `BareWindowTests` | 宿主窗口的目视 / 手工检查：真开一个 GL 窗口、跑主循环并放两个盒子进去，窗口关闭才返回（需要显示设备，CI 不跑） |
+
+```bash
+# 无头检查（CI 跑的就是这一条）
+dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName!~BareWindowTests"
+
+# 目视检查：会弹出窗口，关掉窗口才结束
+dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName~BareWindowTests"
+```
+
+这两类检查都不需要资源文件：`SceneGraphThreadingTests` 只是对象图，`BareWindowTests` 只用几何图元（`Box`）搭场景，所以这个工程里既没有 `Assets` 目录，也没有把宿主的测试数据拷到输出目录的步骤。
+
+早先那 37 项用例（`AssetResolverTests` / `RobotModelAssetResolutionTests` / `PickingTests` / `DefaultSceneTests` 与 `TestAssets` 夹具）随旧 `src/RobotSimulation.Tests/` 目录一并删除。其中「点击落在哪个 link 上」由 Avalonia 宿主的 `--smoke` 自检（见上文）覆盖；URDF 解析、`IAssetResolver` 的路径解析、几何图元与射线拾取的边界行为目前没有自动化检查，改动这些地方时请手动跑两个宿主。
+
+mesh 导入**不需要任何运行时初始化**：Assimp 的原生库随 `Silk.NET.Assimp` 包按 RID 分发，宿主什么都不必准备（早先 `AssimpNet` 时代那个 Linux `libdl.so` 兼容补丁已随依赖一起删除），因此本工程里没有任何模块初始化代码。
+
+

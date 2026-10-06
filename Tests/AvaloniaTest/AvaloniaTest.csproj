@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Host application, not a library: never produce a NuGet package for it. -->
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Core\RobotSimulation.Core.csproj" />
+        <ProjectReference Include="..\..\src\Robot\RobotSimulation.Robot.csproj" />
+        <ProjectReference Include="..\..\src\OpenGL\RobotSimulation.OpenGL.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Avalonia" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.0" />
+        <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.11" />
+    </ItemGroup>
+
+    <!-- Test data lives in this project's own Assets folder and is copied next to the executable, so the
+         path written into the scene builder (RobotViewportControl) resolves regardless of the working
+         directory the host was started from. To change what a run loads, drop the file under Assets and
+         point ModelRelativePath at it. -->
+    <ItemGroup>
+        <None Remove="Assets\**\*" />
+        <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

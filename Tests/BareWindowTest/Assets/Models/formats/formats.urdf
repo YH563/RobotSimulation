@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<!--
+  Mesh-format coverage sample (generated, not downloaded): the same 0.4 m cube exported once per
+  mesh format the importer can parse, so a single run proves which formats Assimp resolves for us.
+
+    base_link  → cube.stl    (STL   : geometry only, no material in the file)
+    obj_cube   → cube.obj    (OBJ   : + cube.mtl, the material is looked up next to the .obj)
+    dae_cube   → cube.dae    (COLLADA: geometry + effect/material in one file)
+    gltf_cube  → cube.gltf   (glTF 2.0: single file, buffer embedded as a base64 data URI)
+    ply_cube   → cube.ply    (PLY   : ascii vertices + a face list — a *mesh*, not a point cloud)
+
+  The five cubes are chained with fixed joints (0.45 m apart) because the robot tree requires
+  exactly one root link — every link has to hang off the root by a joint to be drawn.
+  Mesh files live in the package root (`meshes/` next to this file), which is what the URDF
+  `package://` convention expects: package://<name>/meshes/<file> → <folder of this urdf>/meshes/<file>.
+-->
+<robot name="mesh_formats_demo">
+
+  <!-- Robot-level material definitions referenced by name from the visuals below. -->
+  <material name="stl_color"><color rgba="0.82 0.82 0.88 1"/></material>
+  <material name="dae_color"><color rgba="0.35 0.75 0.45 1"/></material>
+  <material name="gltf_color"><color rgba="0.85 0.30 0.75 1"/></material>
+  <material name="ply_color"><color rgba="0.95 0.75 0.25 1"/></material>
+
+  <!-- 1) STL -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="-0.9 0 0.2" rpy="0 0 0"/>
+      <geometry><mesh filename="package://formats_pkg/meshes/cube.stl"/></geometry>
+      <material name="stl_color"/>
+    </visual>
+  </link>
+
+  <!-- 2) OBJ + MTL (its own diffuse colour comes from cube.mtl) -->
+  <link name="obj_cube">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry><mesh filename="package://formats_pkg/meshes/cube.obj"/></geometry>
+    </visual>
+  </link>
+
+  <!-- 3) COLLADA / DAE -->
+  <link name="dae_cube">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry><mesh filename="package://formats_pkg/meshes/cube.dae"/></geometry>
+      <material name="dae_color"/>
+    </visual>
+  </link>
+
+  <!-- 4) glTF 2.0 -->
+  <link name="gltf_cube">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry><mesh filename="package://formats_pkg/meshes/cube.gltf"/></geometry>
+      <material name="gltf_color"/>
+    </visual>
+  </link>
+
+  <!-- 5) PLY (mesh) -->
+  <link name="ply_cube">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry><mesh filename="package://formats_pkg/meshes/cube.ply"/></geometry>
+      <material name="ply_color"/>
+    </visual>
+  </link>
+
+  <!-- Chain: base_link - obj_cube - dae_cube - gltf_cube - ply_cube, 0.45 m apart along +X. -->
+  <joint name="base_to_obj" type="fixed">
+    <parent link="base_link"/>
+    <child link="obj_cube"/>
+    <origin xyz="0.45 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="obj_to_dae" type="fixed">
+    <parent link="obj_cube"/>
+    <child link="dae_cube"/>
+    <origin xyz="0.45 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="dae_to_gltf" type="fixed">
+    <parent link="dae_cube"/>
+    <child link="gltf_cube"/>
+    <origin xyz="0.45 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="gltf_to_ply" type="fixed">
+    <parent link="gltf_cube"/>
+    <child link="ply_cube"/>
+    <origin xyz="0.45 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

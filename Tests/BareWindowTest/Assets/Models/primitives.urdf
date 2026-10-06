@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+<!--
+  URDF built-in geometry coverage sample (written by hand, not downloaded).
+
+  One link per geometry type the URDF standard defines inside <visual>, so a single run proves the
+  parser turns <box> / <sphere> / <cylinder> / <capsule> into renderable primitives:
+
+    box_link       <box      size="0.6 0.4 0.35"/>   + a rotated <origin> and a rotated <collision>
+    sphere_link    <sphere   radius="0.25"/>
+    cylinder_link  <cylinder radius="0.18" length="0.5"/>
+    capsule_link   <capsule  radius="0.14" length="0.4"/>
+
+  Each link also carries <collision> and <inertial> blocks: they must be parsed correctly but never
+  drawn, which is why the visuals are given explicit names and robot-level <material> colors. The
+  links hang off box_link through fixed joints spaced 0.8 m apart — the robot tree needs exactly one
+  root link, and the spacing makes the four primitives visible side by side.
+-->
+<robot name="urdf_primitives_demo">
+
+  <!-- Robot-level materials, referenced by name from the visuals below. -->
+  <material name="box_orange"><color rgba="0.90 0.55 0.20 1"/></material>
+  <material name="sphere_blue"><color rgba="0.25 0.55 0.90 1"/></material>
+  <material name="cylinder_green"><color rgba="0.30 0.80 0.45 1"/></material>
+  <material name="capsule_pink"><color rgba="0.90 0.35 0.75 1"/></material>
+
+  <!-- Root link: a box whose visual origin carries both a translation and a rotation. -->
+  <link name="box_link">
+    <visual name="box_visual">
+      <origin xyz="0 0 0.175" rpy="0 0 0.5236"/>
+      <geometry><box size="0.6 0.4 0.35"/></geometry>
+      <material name="box_orange"/>
+    </visual>
+    <collision name="box_collision">
+      <origin xyz="0 0 0.175" rpy="0 0 0.5236"/>
+      <geometry><box size="0.6 0.4 0.35"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.0225" ixy="0" ixz="0" iyy="0.0385" iyz="0" izz="0.0481"/>
+    </inertial>
+  </link>
+
+  <!-- Sphere -->
+  <link name="sphere_link">
+    <visual name="sphere_visual">
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry><sphere radius="0.25"/></geometry>
+      <material name="sphere_blue"/>
+    </visual>
+    <collision>
+      <geometry><sphere radius="0.25"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.025" ixy="0" ixz="0" iyy="0.025" iyz="0" izz="0.025"/>
+    </inertial>
+  </link>
+
+  <!-- Cylinder -->
+  <link name="cylinder_link">
+    <visual name="cylinder_visual">
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.18" length="0.5"/></geometry>
+      <material name="cylinder_green"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.18" length="0.5"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.0286" ixy="0" ixz="0" iyy="0.0286" iyz="0" izz="0.0162"/>
+    </inertial>
+  </link>
+
+  <!-- Capsule (a URDF extension the parser accepts on the same <geometry> element) -->
+  <link name="capsule_link">
+    <visual name="capsule_visual">
+      <origin xyz="0 0 0.34" rpy="0 0 0"/>
+      <geometry><capsule radius="0.14" length="0.4"/></geometry>
+      <material name="capsule_pink"/>
+    </visual>
+    <collision>
+      <geometry><capsule radius="0.14" length="0.4"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.0096" ixy="0" ixz="0" iyy="0.0096" iyz="0" izz="0.0020"/>
+    </inertial>
+  </link>
+
+  <!-- Chain: box_link - sphere_link - cylinder_link - capsule_link, 0.8 m apart along +X. -->
+  <joint name="box_to_sphere" type="fixed">
+    <parent link="box_link"/>
+    <child link="sphere_link"/>
+    <origin xyz="0.8 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="sphere_to_cylinder" type="fixed">
+    <parent link="sphere_link"/>
+    <child link="cylinder_link"/>
+    <origin xyz="0.8 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="cylinder_to_capsule" type="fixed">
+    <parent link="cylinder_link"/>
+    <child link="capsule_link"/>
+    <origin xyz="0.8 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

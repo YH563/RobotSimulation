@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- generated sample: one 0.4 m cube, COLLADA 1.4.1 (DAE) -->
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <unit meter="1" name="meter"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_effects>
+    <effect id="cubeEffect">
+      <profile_COMMON>
+        <technique sid="common">
+          <lambert>
+            <diffuse><color sid="diffuse">0.35 0.75 0.45 1</color></diffuse>
+          </lambert>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="cubeMaterial" name="cubeMaterial">
+      <instance_effect url="#cubeEffect"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="cubeMesh" name="unit_cube">
+      <mesh>
+        <source id="cube-positions">
+          <float_array id="cube-positions-array" count="24">-0.200000 -0.200000 -0.200000 0.200000 -0.200000 -0.200000 0.200000 0.200000 -0.200000 -0.200000 0.200000 -0.200000 -0.200000 -0.200000 0.200000 0.200000 -0.200000 0.200000 0.200000 0.200000 0.200000 -0.200000 0.200000 0.200000</float_array>
+          <technique_common>
+            <accessor source="#cube-positions-array" count="8" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="cube-vertices">
+          <input semantic="POSITION" source="#cube-positions"/>
+        </vertices>
+        <triangles material="cubeMaterial" count="12">
+          <input semantic="VERTEX" source="#cube-vertices" offset="0"/>
+          <p>0 3 2 0 2 1 4 5 6 4 6 7 0 1 5 0 5 4 2 3 7 2 7 6 3 0 4 3 4 7 1 2 6 1 6 5</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="cubeNode" name="unit_cube" type="NODE">
+        <instance_geometry url="#cubeMesh">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="cubeMaterial" target="#cubeMaterial"/>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

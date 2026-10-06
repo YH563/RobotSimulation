@@ -1,0 +1,86 @@
+solid unit_cube  # generated sample: one 0.4 m cube, ASCII STL, 12 facets
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.200000 -0.200000 -0.200000
+      vertex -0.200000 0.200000 -0.200000
+      vertex 0.200000 0.200000 -0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.200000 -0.200000 -0.200000
+      vertex 0.200000 0.200000 -0.200000
+      vertex 0.200000 -0.200000 -0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.200000 -0.200000 0.200000
+      vertex 0.200000 -0.200000 0.200000
+      vertex 0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.200000 -0.200000 0.200000
+      vertex 0.200000 0.200000 0.200000
+      vertex -0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.200000 -0.200000 -0.200000
+      vertex 0.200000 -0.200000 -0.200000
+      vertex 0.200000 -0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.200000 -0.200000 -0.200000
+      vertex 0.200000 -0.200000 0.200000
+      vertex -0.200000 -0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 0.200000 0.200000 -0.200000
+      vertex -0.200000 0.200000 -0.200000
+      vertex -0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 -0.000000
+    outer loop
+      vertex 0.200000 0.200000 -0.200000
+      vertex -0.200000 0.200000 0.200000
+      vertex 0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.200000 0.200000 -0.200000
+      vertex -0.200000 -0.200000 -0.200000
+      vertex -0.200000 -0.200000 0.200000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.200000 0.200000 -0.200000
+      vertex -0.200000 -0.200000 0.200000
+      vertex -0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.200000 -0.200000 -0.200000
+      vertex 0.200000 0.200000 -0.200000
+      vertex 0.200000 0.200000 0.200000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.200000 -0.200000 -0.200000
+      vertex 0.200000 0.200000 0.200000
+      vertex 0.200000 -0.200000 0.200000
+    endloop
+  endfacet
+endsolid unit_cube
