@@ -65,8 +65,8 @@ These types are backend implementation details; `public` only for same-assembly/
 | `PointMesh` | GPU point buffer (`GL_POINTS`), for `PointCloud2Data`; optional per-vertex color, point size is a uniform; `Sync(data)` uploads incrementally by revision (only the changed slots via `BufferSubData`, the store is rebuilt only when the capacity changes) and `Draw()` issues at most two `DrawArrays` when the ring wraps |
 | `Material` | GPU material: owns shader + uploaded textures; `Apply(MaterialData)` writes appearance params |
 | `Texture2D` | GPU 2D texture: from `TextureReference` (file or memory), sRGB/linear internal format per `TextureColorSpace`; can gen mipmaps |
-| `ShaderProgram` | Shader program + uniform cache; `Use()` / `SetUniform(...)` (multi-overload) |
-| `EmbeddedShaders` | Standard shader catalog: reads each pass's GLSL from embedded resources (Model/Line/Point/Skybox/Axes `.vert/.frag`; Line also has a `.geom` that expands segments to screen-space quads) |
+| `ShaderProgram` | Shader program + uniform cache; `Use()` / `SetUniform(...)` (multi-overload); an optional geometry stage via `ShaderProgram(gl, vertex, geometry, fragment)` (pass `null` to omit it) |
+| `EmbeddedShaders` | Standard shader catalog: reads each pass's GLSL from embedded resources (Model/Line/Point/Skybox/Axes `.vert/.frag`; Line also has a `.geom` that expands segments to screen-space quads); `Get(pass)` returns `(Vertex, Geometry, Fragment)`, with `Geometry` null for passes that have no such stage |
 
 > Endpoint: shader sources live in this assembly's `Shaders/` directory, packed as embedded resources; `Core` only defines `RenderPassKind`; hosts don't manage shader paths.
 

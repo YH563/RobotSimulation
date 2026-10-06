@@ -142,7 +142,7 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 ### `GameObject` 图元（`Scene/Primitives/`）
 均为 `GameObject` 派生，构造即生成 CPU 网格与材质，可直接 `scene.Add`：
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)`（轴沿 +Z）/ `Capsule(radius, height, name?)`（轴沿 +Z，总高 = height + 2×radius）
-- `GroundPlane(size, name?)` / `Arrow(...)`（方向箭头）/ `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
+- `GroundPlane(size, name?)` / `Arrow(...)`（方向箭头）/ `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(points, color?, name?, lineWidth?)` / `PointCloud(...)`
   - `Axes` 有两种尺寸策略（`AxesSizing`）：`ConstantScreenSize`（默认，屏幕尺寸由 `ScreenScale`/`MinWorldLength`/`MaxWorldLength` 固定，适合做「节点标记」）与 `FixedWorldLength`（箭头长度恒为 `Length` 个世界单位，适合做「尺子」）。两种模式下 `Length` 都可写：坐标轴着色器按箭头自身长度做归一化，改长度不需要重建几何。
   - `AlwaysOnTop`（默认 **false**）是该轴系的深度策略。关闭时它就是普通几何，模型能遮挡它；打开时渲染器在普通遍历里把整套轴系排队、最后在刚清空深度缓冲的画面上绘制，于是任何几何都藏不住它——而各轴系之间仍互相正确遮挡（两套重叠时近的那套胜出）。`GameObject.ShowLocalAxes`（因而 `SceneGraph.Select`）会把它打开，因为「对象自己的坐标系」正立在被标注的那块网格内部；`FixedWorldLength` 的尺子则应当保持关闭——一把能穿透被测物体的尺子，会把场景尺寸说成假的。
 

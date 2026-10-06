@@ -65,8 +65,8 @@ public static class GraphicsFactory
 | `PointMesh` | GPU 点缓冲（`GL_POINTS`），对应 `PointCloud2Data`；可选逐顶点颜色，点尺寸为 uniform；`Sync(data)` 按修订号增量上传（只对变更槽位 `BufferSubData`，仅在容量变化时重建缓冲），环形折返时 `Draw()` 最多两次 `DrawArrays` |
 | `Material` | GPU 材质：持有着色器与已上传纹理；`Apply(MaterialData)` 写入外观参数 |
 | `Texture2D` | GPU 二维纹理：从`TextureReference`（文件或内存）创建，按 `TextureColorSpace` 决定 sRGB/线性内格式；可生成 mipmap |
-| `ShaderProgram` | 着色器程序与 uniform 缓存；`Use()` / `SetUniform(...)`（多样式重载） |
-| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes `.vert/.frag`；Line 另有 `.geom`，把线段扩成屏幕空间四边形） |
+| `ShaderProgram` | 着色器程序与 uniform 缓存；`Use()` / `SetUniform(...)`（多样式重载）；可经 `ShaderProgram(gl, vertex, geometry, fragment)` 带一个可选几何着色器阶段（传 `null` 即省略） |
+| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes `.vert/.frag`；Line 另有 `.geom`，把线段扩成屏幕空间四边形）；`Get(pass)` 返回 `(Vertex, Geometry, Fragment)`，无该阶段的 pass 其 `Geometry` 为 null |
 
 > 端点：着色器源文件位于本程序集 `Shaders/` 目录，作为嵌入式资源打包；`Core` 只约定 `RenderPassKind`，宿主无需管理着色器路径。
 

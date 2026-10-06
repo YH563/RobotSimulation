@@ -24,6 +24,7 @@ The repo is organized by the boundaries of *future publishable NuGet packages* â
 
 - **Scene object model**: `GameObject` + `Transform` hierarchy, `SceneGraph` root container, `Camera` (orbit), `Light` (point / directional).
 - **Visualization primitives**: `Box` / `Sphere` / `Cylinder` / `Capsule` / `GroundPlane` / `Arrow` / `Axes` / `Grid` / `Curve` / `PointCloud`.
+- **Variable line width**: `GameObject.LineWidth` sets a line pass's on-screen width in pixels (e.g. `Curve(points, lineWidth: 3f)`); the backend expands each segment into a screen-space quad, so the width is perspective-independent and does not depend on driver `glLineWidth` support (which core profiles may clamp to 1).
 - **Pure-CPU render data**: `MeshData` / `LineData` / `PointCloud2Data` / `MaterialData` / `TextureReference`, thread-friendly and reusable.
 - **Render abstraction**: `IRenderContext` / `IRenderer`, `GraphicsFactory` composition root; `OpenGL` is the only implementation.
 - **Performance & device info**: `IRenderer.Stats` (`FrameStats`: FPS / frame time) and `IRenderContext.DeviceInfo` (`GraphicsDeviceInfo`: GPU vendor / renderer / GL & GLSL version) â€” pure data the host renders as its own overlay.

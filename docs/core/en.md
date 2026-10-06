@@ -142,7 +142,7 @@ Methods:
 ### `GameObject` primitives (`Scene/Primitives/`)
 All `GameObject` subclasses; the ctor generates CPU mesh + material, ready for `scene.Add`:
 - `Box(width, height, depth, name?)` / `Sphere(radius, name?)` / `Cylinder(radius, height, name?)` (axis +Z) / `Capsule(radius, height, name?)` (axis +Z; total height = height + 2×radius)
-- `GroundPlane(size, name?)` / `Arrow(...)` / `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(...)` / `PointCloud(...)`
+- `GroundPlane(size, name?)` / `Arrow(...)` / `Axes(length, name?)` / `Grid(size, spacing, name?)` / `Curve(points, color?, name?, lineWidth?)` / `PointCloud(...)`
   - `Axes` has two sizing policies (`AxesSizing`): `ConstantScreenSize` (default, a marker whose screen size is fixed by `ScreenScale`/`MinWorldLength`/`MaxWorldLength`) and `FixedWorldLength` (the arrows measure exactly `Length` world units). `Length` stays writable in both, because the axes shader normalises by the arrow's own length.
   - `AlwaysOnTop` (default **false**) is the set's depth policy. Off, the set is ordinary geometry that the model occludes. On, the renderer queues the whole set during the ordinary walk and draws it last, on a depth buffer it has just cleared, so no geometry can hide it — while the on-top sets still occlude each other correctly, a nearer one winning where two overlap. `GameObject.ShowLocalAxes` (and therefore `SceneGraph.Select`) turns it on, because a per-object frame marker sits inside the mesh it annotates; a `FixedWorldLength` ruler is meant to leave it off, since a ruler that shows through what it measures lies about the scene.
 

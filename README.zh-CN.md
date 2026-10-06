@@ -24,6 +24,7 @@
 
 - **场景对象模型**: `GameObject` + `Transform` 层级、`SceneGraph` 根容器，`Camera`（轨道相机）、`Light`（点光/方向光）。
 - **可视化原语**: `Box` / `Sphere` / `Cylinder` / `Capsule` / `GroundPlane` / `Arrow` / `Axes` / `Grid` / `Curve` / `PointCloud`。
+- **可变线宽**: `GameObject.LineWidth` 设定线通道的屏幕像素宽度（如 `Curve(points, lineWidth: 3f)`）；后端把每条线段扩成屏幕空间四边形，线宽不随透视变化，也不依赖驱动的 `glLineWidth` 支持上限（core profile 可能把它钳到 1）。
 - **纯 CPU 渲染数据**: `MeshData` / `LineData` / `PointCloud2Data` / `MaterialData` / `TextureReference`，可任意线程构建、可复用。
 - **渲染抽象**: `IRenderContext` / `IRenderer`，`GraphicsFactory` 组合根；`OpenGL` 是唯一实现。
 - **性能与设备信息**: `IRenderer.Stats`（`FrameStats`：FPS / 帧耗时）与 `IRenderContext.DeviceInfo`（`GraphicsDeviceInfo`：显卡厂商 / 型号 / GL & GLSL 版本），均为纯数据，叠加层由宿主自绘。
