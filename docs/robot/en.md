@@ -62,7 +62,7 @@ public IReadOnlyList<CollisionContact> DetectSelfCollision(       // collision q
 
 - `UrdfParser` parses `<link><collision>` into `CollisionElement` (origin + geometry); `RobotModel` mounts collision geometry on the corresponding link skeleton node, so collision shapes follow joint motion automatically.
 - Collision meshes share the path-keyed import cache with visuals; a failed collision-mesh load logs a warning and skips that shape instead of breaking visualization.
-- `RobotCollisionModel.DetectSelfCollision` skips shapes on the same link and directly joint-connected links by default; `includeAdjacent` / `allowPair` open that up.
+- `RobotCollisionModel.DetectSelfCollision` skips shapes on the same link and directly joint-connected links by default; `includeAdjacent` / `allowPair` open that up. `GameObject.CollisionEnabled = false` disables that link (and its subtree) in self-collision.
 - Debug view: `robot.CollisionModel.CreateDebugView()` mounts translucent solid fills (`RenderPassKind.Debug`) under each link that follow joints; `Dispose()` removes them.
 - This is still geometry only: no collision response, dynamics or contact solving.
 

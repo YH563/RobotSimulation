@@ -64,6 +64,19 @@ public class UrdfCollisionTests
     }
 
     [Fact]
+    public void DisabledCollisionSubtreeIsSkippedBySelfCollision()
+    {
+        RobotModel robot = NonAdjacentOverlapRobot();
+        Assert.NotEmpty(robot.DetectSelfCollision());
+
+        robot.CollisionEnabled = false;
+        Assert.Empty(robot.DetectSelfCollision());
+
+        robot.CollisionEnabled = true;
+        Assert.NotEmpty(robot.DetectSelfCollision());
+    }
+
+    [Fact]
     public void DebugViewMountsFillsForEveryCollisionShape()
     {
         RobotModel robot = NonAdjacentOverlapRobot();

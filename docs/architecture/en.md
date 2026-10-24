@@ -1,6 +1,6 @@
 # RobotSimulation Architecture (English)
 
-> Status: v0.5.0 reflecting the current implementation. Companion: `../../README.md`, `../core/en.md`, `../robot/en.md`, `../opengl/en.md`.
+> Status: v0.5.1 reflecting the current implementation. Companion: `../../README.md`, `../core/en.md`, `../robot/en.md`, `../opengl/en.md`.
 
 This document describes the architecture from the perspective of *publishable NuGet libraries*: package boundaries, dependency direction, the runtime/render threading model, key design decisions (ADRs), and extension points.
 

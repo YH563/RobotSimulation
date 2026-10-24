@@ -48,7 +48,7 @@ dotnet add package RobotSimulation.Robot
 dotnet add package RobotSimulation.OpenGL
 ```
 
-> The current package version is **0.5.0** (see `Directory.Build.props`); the repo targets `net8.0`.
+> The current package version is **0.5.1** (see `Directory.Build.props`); the repo targets `net8.0`.
 
 ## 4. Quick Start
 

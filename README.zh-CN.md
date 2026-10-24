@@ -48,7 +48,7 @@ dotnet add package RobotSimulation.Robot
 dotnet add package RobotSimulation.OpenGL
 ```
 
-> 当前包版本为 **0.5.0**（见 `Directory.Build.props`）；仓库以 `net8.0` 为目标框架。
+> 当前包版本为 **0.5.1**（见 `Directory.Build.props`）；仓库以 `net8.0` 为目标框架。
 
 ## 4. 快速上手 / Quick Start
 

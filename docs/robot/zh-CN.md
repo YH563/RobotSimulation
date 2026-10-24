@@ -62,7 +62,7 @@ public IReadOnlyList<CollisionContact> DetectSelfCollision(        // 非相邻 
 
 - `UrdfParser` 解析 `<link><collision>` 为 `CollisionElement`（origin + geometry）；`RobotModel` 把 collision geometry 挂到对应 link 骨架节点上，因此 link 随关节运动时碰撞体自动跟随。
 - collision mesh 与 visual mesh 共用按路径缓存的导入结果；碰撞网格加载失败只记警告并跳过该碰撞体，不阻断可视化。
-- `RobotCollisionModel.DetectSelfCollision` 默认跳过同一 link 和直接关节相邻的 link；`includeAdjacent` 或 `allowPair` 可放开。
+- `RobotCollisionModel.DetectSelfCollision` 默认跳过同一 link 和直接关节相邻的 link；`includeAdjacent` 或 `allowPair` 可放开。`GameObject.CollisionEnabled = false` 会按子树禁用对应 link 的碰撞参与。
 - 调试显示：`robot.CollisionModel.CreateDebugView()` 在每个 link 下挂半透明实体填充（`RenderPassKind.Debug`），随关节自动移动；`Dispose()` 移除。
 - 仍然只是几何查询：不做碰撞响应、动力学或接触求解。
 

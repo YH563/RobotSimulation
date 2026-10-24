@@ -76,14 +76,14 @@ public sealed class RobotCollisionModel
         {
             string nameA = _linkOrder[i];
             GameObject linkA = _linkNodes[nameA];
-            if (linkA.CollisionShapes.Count == 0)
+            if (linkA.CollisionShapes.Count == 0 || !IsCollisionEnabled(linkA))
                 continue;
 
             for (int j = i + 1; j < _linkOrder.Count; j++)
             {
                 string nameB = _linkOrder[j];
                 GameObject linkB = _linkNodes[nameB];
-                if (linkB.CollisionShapes.Count == 0)
+                if (linkB.CollisionShapes.Count == 0 || !IsCollisionEnabled(linkB))
                     continue;
                 if (!includeAdjacent && AreAdjacent(nameA, nameB))
                     continue;
@@ -121,6 +121,17 @@ public sealed class RobotCollisionModel
 
     private bool AreAdjacent(string a, string b)
         => _adjacent.TryGetValue(a, out HashSet<string>? neighbours) && neighbours.Contains(b);
+
+    private static bool IsCollisionEnabled(GameObject node)
+    {
+        for (Transform? transform = node.Transform; transform is not null; transform = transform.Parent)
+        {
+            if (!transform.Owner.CollisionEnabled)
+                return false;
+        }
+
+        return true;
+    }
 
     private static Matrix4x4 GetWorld(GameObject node, Dictionary<GameObject, Matrix4x4> cache)
     {

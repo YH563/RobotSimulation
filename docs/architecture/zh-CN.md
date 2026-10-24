@@ -1,6 +1,6 @@
 # RobotSimulation 架构设计（简体中文）
 
-> 状态：v0.5.0 反映当前实现。配套：`../../README.zh-CN.md`、`../core/zh-CN.md`、`../robot/zh-CN.md`、`../opengl/zh-CN.md`。
+> 状态：v0.5.1 反映当前实现。配套：`../../README.zh-CN.md`、`../core/zh-CN.md`、`../robot/zh-CN.md`、`../opengl/zh-CN.md`。
 
 本文按「可发布 NuGet 库」的视角描述整体架构：包边界、依赖方向、运行时/渲染线程模型、关键设计决策（ADR）与扩展点。
 
