@@ -14,10 +14,11 @@ name: publish
 #   2) 本仓库 Settings → Secrets and variables → Actions → New repository secret：
 #        NUGET_USER = 你的 nuget.org 用户名（不是邮箱；不想用 secret 也可直接把它写进下面的 user:）
 #
-# 发布新版本：先改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），打一个带注解的
-# tag 并推送（注解正文就是 Release 说明，第一行会被当成 Release 标题），再到 Actions 页面 Run workflow。
-# 一次运行做两件事：推三个包到 nuget.org（publish job），再按 tag 注解建 / 更新对应的 GitHub Release
-# （release job，见文件末尾；它只拿到 contents: write，推包那步仍然只有 contents: read）。
+# 发布新版本：只改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），再到 Actions
+# 页面 Run workflow 即可。若远端还没有 v<version> tag，release job 会按本次运行的提交自动创建带注解 tag
+# 并推送，然后建 / 更新对应的 GitHub Release（见文件末尾；它只拿到 contents: write，推包那步仍然只有
+# contents: read）。想手写 Release 说明，仍可先手动 git tag -a / git push origin <tag>，workflow 会沿用它。
+# 一次运行做两件事：推三个包到 nuget.org（publish job），再按 tag 注解建 / 更新 GitHub Release。
 on:
   workflow_dispatch:
   # 想改成「推 tag 自动发布」就取消下面注释。注意：部分平台的 OIDC ref claim 不接受 tag，
@@ -154,7 +155,7 @@ jobs:
           echo "ref    : $GITHUB_REF  ($GITHUB_REF_NAME)"
           echo "commit : $(git rev-parse HEAD)"
 
-      - name: Create or update the GitHub Release for this version
+      - name: Ensure the release tag and create/update the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -169,11 +170,19 @@ jobs:
           tag="v$version"
           echo "版本 $version -> tag $tag"
 
-          # 沿用「先推 tag，再 Run workflow」的流程：tag 不在远端就直接报错，避免默默建出一个没有
-          # 注解正文的 Release（下面的 --verify-tag 也会再挡一次）。
+          # 忘记推 tag 不该让整个发布停在最后一步：远端缺少 tag 时，按本次运行的提交自动创建带注解
+          # tag 并推送。tag 的标题是版本号，正文沿用当前提交说明；想自定义 Release notes 仍可先手动
+          # 创建并推送 tag，下面的检查会直接沿用它。
           if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "::error::远端没有 tag $tag。请先 git tag -a $tag（注解正文写 Release 说明）并 git push origin $tag，或核对 Directory.Build.props 的 <Version>。"
-            exit 1
+            echo "::notice::本地没有 tag $tag，按 $GITHUB_SHA 自动创建。"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "RobotSimulation $version" -m "$(git log -1 --pretty=%B)"
+          fi
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::notice::远端没有 tag $tag，自动推送。"
+            git push origin "$tag"
           fi
 
           # tag 指向的提交与本次运行的提交不一致时只提醒、不阻断：出错重跑、或本次运行选了别的 ref
