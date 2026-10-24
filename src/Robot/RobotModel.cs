@@ -4,10 +4,12 @@ using System.IO;
 using System.Numerics;
 using System.Xml;
 using System.Xml.Linq;
+using RobotSimulation.Core.Geometry.Collision;
 using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Rendering;
 using RobotSimulation.Core.Scene;
 using RobotSimulation.Core.Utils;
+using RobotSimulation.Robot.Collision;
 using RobotSimulation.Robot.Description;
 using RobotSimulation.Robot.State;
 using RobotSimulation.Robot.Urdf;
@@ -47,6 +49,12 @@ public sealed class RobotModel : GameObject
     private readonly List<GameObject> _drivableChildLinks = new();
     private float[] _jointValues = Array.Empty<float>();
 
+    // Link skeleton nodes by link name (built before collision shapes are mounted).
+    private IReadOnlyDictionary<string, GameObject> _linkNodes = new Dictionary<string, GameObject>();
+
+    // Model files are loaded once per resolved path and shared by visual and collision elements.
+    private readonly Dictionary<string, LoadedModel> _modelCache = new(StringComparer.Ordinal);
+
     // ------------------------------------------------------------------
     // Construction (extension point: any description source → a robot GameObject tree)
     // ------------------------------------------------------------------
@@ -74,6 +82,7 @@ public sealed class RobotModel : GameObject
         _effectiveResolver = resolver ?? new FileSystemAssetResolver(assetDirectory);
         RobotName = description.Name ?? string.Empty;
         BuildTree();
+        CollisionModel = new RobotCollisionModel(_description, _linkNodes);
         LockTree(); // Lock the whole subtree after construction: child-link poses can only change via RobotModel's built-in interface.
         // Not highlighted by default. Highlighting is pure click feedback, set by the host on a mouse hit
         // via SceneGraph.PickAndHighlight. To highlight the whole tree by default, call
@@ -168,6 +177,22 @@ public sealed class RobotModel : GameObject
     public RobotDescription Description => _description;
 
     /// <summary>
+    /// Collision model built from the URDF &lt;collision&gt; elements. Its self-collision query uses the
+    /// current link world poses, so it follows <see cref="SetJointValue"/> automatically.
+    /// </summary>
+    public RobotCollisionModel CollisionModel { get; }
+
+    /// <summary>
+    /// Convenience forwarder to <see cref="CollisionModel"/>: detects overlaps between collision shapes on
+    /// non-adjacent links. Adjacent links are skipped unless <paramref name="includeAdjacent"/> is true.
+    /// </summary>
+    /// <param name="includeAdjacent">When true, also test links directly connected by a joint.</param>
+    /// <param name="allowPair">Optional pair filter; return false to skip a link pair.</param>
+    public IReadOnlyList<CollisionContact> DetectSelfCollision(bool includeAdjacent = false,
+        Func<GameObject, GameObject, bool>? allowPair = null)
+        => CollisionModel.DetectSelfCollision(includeAdjacent, allowPair);
+
+    /// <summary>
     /// Robot name (URDF &lt;robot name&gt;). Distinct from <see cref="GameObject.Name"/> (the root link
     /// name) — GameObject.Name refers to the scene skeleton node's name.
     /// </summary>
@@ -218,6 +243,8 @@ public sealed class RobotModel : GameObject
             linkNodes[link.Name] = new GameObject(null, null, link.Name);
         }
 
+        _linkNodes = linkNodes;
+
         // 2) Mount the visual child nodes (carrying CPU model data and material description).
         foreach (Link link in _description.Links)
         {
@@ -227,6 +254,15 @@ public sealed class RobotModel : GameObject
                 foreach (GameObject visualNode in BuildVisualNodes(link.Name, i, link.VisualElements[i]))
                     visualNode.Transform.Parent = linkNode.Transform;
             }
+        }
+
+        // 2b) Mount collision shapes directly on the link skeleton nodes: their world pose then follows the
+        // joint chain without a second FK path.
+        foreach (Link link in _description.Links)
+        {
+            GameObject linkNode = linkNodes[link.Name];
+            for (int i = 0; i < link.CollisionElements.Count; i++)
+                BuildCollisionShapes(link.Name, i, link.CollisionElements[i], linkNode);
         }
 
         // 3) Joint topology: mount each child link's skeleton under its parent, applying joint.origin (zero pose).
@@ -369,7 +405,7 @@ public sealed class RobotModel : GameObject
         LoadedModel model;
         try
         {
-            model = AssimpModelLoader.Load(path);
+            model = LoadModelCached(path);
         }
         catch (Exception ex)
         {
@@ -395,20 +431,102 @@ public sealed class RobotModel : GameObject
         return nodes;
     }
 
+    private void BuildCollisionShapes(string linkName, int index, CollisionElement collision, GameObject linkNode)
+    {
+        switch (collision.Geometry)
+        {
+            case BoxGeometry box:
+                linkNode.AddCollisionShape(new BoxShape(box.Size), collision.LocalTransform);
+                break;
+
+            case SphereGeometry sphere:
+                linkNode.AddCollisionShape(new SphereShape(sphere.Radius), collision.LocalTransform);
+                break;
+
+            case CylinderGeometry cylinder:
+                linkNode.AddCollisionShape(new CylinderShape(cylinder.Radius, cylinder.Length),
+                    collision.LocalTransform);
+                break;
+
+            case CapsuleGeometry capsule:
+                linkNode.AddCollisionShape(new CapsuleShape(capsule.Radius, capsule.Length),
+                    collision.LocalTransform);
+                break;
+
+            case MeshGeometry mesh:
+            {
+                string? path = _effectiveResolver.Resolve(mesh.Uri, _description.SourceBaseDirectory);
+                if (path is null)
+                {
+                    Logger.Warning(
+                        $"[RobotModel] collision mesh '{mesh.Uri}' (link '{linkName}' collision#{index}) was not found; " +
+                        "the collision shape is skipped.");
+                    break;
+                }
+
+                LoadedModel model;
+                try
+                {
+                    model = LoadModelCached(path);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(
+                        $"[RobotModel] collision mesh import failed: {path} (link '{linkName}' collision#{index}); " +
+                        $"the collision shape is skipped. {ex.Message}");
+                    break;
+                }
+
+                foreach (LoadedMesh submesh in model.Meshes)
+                    linkNode.AddCollisionShape(new MeshShape(submesh.MeshData), collision.LocalTransform);
+                break;
+            }
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(collision), collision.Geometry,
+                    "Unsupported collision geometry.");
+        }
+    }
+
+    private LoadedModel LoadModelCached(string path)
+    {
+        if (_modelCache.TryGetValue(path, out LoadedModel? cached))
+            return cached;
+
+        LoadedModel model = AssimpModelLoader.Load(path);
+        _modelCache[path] = model;
+        return model;
+    }
+
     /// <summary>Merge rule: the file's own material is the baseline; an explicit URDF material's color/texture overrides it.</summary>
     private MaterialData MergeMeshMaterial(MaterialData fileMaterial, MaterialElement? urdf)
     {
-        // Every import produces a fresh material instance, so it is safe to override in place (file material is the baseline).
+        // The model cache may hand the same LoadedMesh to several visuals, so clone rather than mutating
+        // the cached file material in place.
+        var merged = new MaterialData
+        {
+            BaseColor = fileMaterial.BaseColor,
+            MetallicFactor = fileMaterial.MetallicFactor,
+            RoughnessFactor = fileMaterial.RoughnessFactor,
+            AlbedoTexture = fileMaterial.AlbedoTexture,
+            NormalTexture = fileMaterial.NormalTexture,
+            MetallicTexture = fileMaterial.MetallicTexture,
+            RoughnessTexture = fileMaterial.RoughnessTexture,
+            DoubleSided = fileMaterial.DoubleSided,
+            Wireframe = fileMaterial.Wireframe,
+            PassKind = fileMaterial.PassKind,
+        };
+
         if (urdf?.Color is { } color)
-            fileMaterial.BaseColor = color;
+            merged.BaseColor = color;
         if (urdf?.TextureFile is { } textureFile)
         {
             IAssetResolver resolver = _effectiveResolver;
             if (resolver.Resolve(textureFile, _description.SourceBaseDirectory) is { } texturePath)
-                fileMaterial.AlbedoTexture = TextureReference.FromFile(texturePath);
+                merged.AlbedoTexture = TextureReference.FromFile(texturePath);
         }
 
-        return fileMaterial;
+        return merged;
     }
 
     /// <summary>Instantiates a URDF primitive geometry into the corresponding primitive GameObject (Box/Sphere/Cylinder/Capsule).</summary>

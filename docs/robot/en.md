@@ -43,6 +43,7 @@ Requires `description` to have exactly one root link; multiple roots are not an 
 | `DrivableJoints` | `IReadOnlyList<Joint>` | Drivable joints (Revolute/Continuous/Prismatic, in description order) |
 | `DrivableJointCount` | `int` | Number of drivable joints (array length required by `ApplyJointValues`) |
 | `RootPose` | `Matrix4x4` | Robot overall (root link) pose in its parent frame; written via built-in interfaces |
+| `CollisionModel` | `RobotCollisionModel` | Collision model built from URDF collision elements; self-collision uses current link world poses and follows joints |
 
 ### Methods
 
@@ -50,9 +51,20 @@ Requires `description` to have exactly one root link; multiple roots are not an 
 public RobotState CreateState();                                  // headless joint state + FK
 public void SetJointValue(string name, float value);              // drive by name (radians rotation / meters translation), immediately updating the child link's local Transform
 public void ApplyJointValues(IReadOnlyList<float> values);        // batch drive in drivable order
+public IReadOnlyList<CollisionContact> DetectSelfCollision(       // collision query for non-adjacent links
+    bool includeAdjacent = false,
+    Func<GameObject, GameObject, bool>? allowPair = null);
 ```
 
 > Joints only act on `Transform` (pure data), never touching OpenGL. After construction the whole subtree is `Transform` read-only locked; child link poses can only be written via `RobotModel` built-in interfaces or `RootPose`, not by external direct mutation.
+
+### Collision / self-collision
+
+- `UrdfParser` parses `<link><collision>` into `CollisionElement` (origin + geometry); `RobotModel` mounts collision geometry on the corresponding link skeleton node, so collision shapes follow joint motion automatically.
+- Collision meshes share the path-keyed import cache with visuals; a failed collision-mesh load logs a warning and skips that shape instead of breaking visualization.
+- `RobotCollisionModel.DetectSelfCollision` skips shapes on the same link and directly joint-connected links by default; `includeAdjacent` / `allowPair` open that up.
+- Debug view: `robot.CollisionModel.CreateDebugView()` mounts translucent solid fills (`RenderPassKind.Debug`) under each link that follow joints; `Dispose()` removes them.
+- This is still geometry only: no collision response, dynamics or contact solving.
 
 ### Usage
 
@@ -76,14 +88,15 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 2. Description data model (`Description/`)
 
-> Namespace `RobotSimulation.Robot.Description`. Pure data, zero render deps, serializable; covers only visualization-relevant info, ignoring physical parameters (inertial, collision, etc).
+> Namespace `RobotSimulation.Robot.Description`. Pure data, zero render deps, serializable; covers visualization and collision geometry, ignoring physical parameters such as inertia.
 
 - `RobotDescription`: `Name` (`<robot name>`), `Links` / `Joints` (`List`, mutable), `RootLinks` (computed: every link no joint uses as a child) and `FindLink(name)`.
-- `Link`: `Name`, `VisualElements` (`List<VisualElement>`; a URDF link may carry several visuals).
+- `Link`: `Name`, `VisualElements` (`List<VisualElement>`; a URDF link may carry several visuals), `CollisionElements` (`List<CollisionElement>`).
+- `CollisionElement`: `Name`, `LocalTransform`, `Geometry`; ↔ URDF `<collision>` without materials or physical coefficients.
 - `VisualElement`: `LocalTransform` (row-major `Matrix4x4`), `Geometry`, optional `Material` (`MaterialElement?`; null = the rendering layer's default appearance).
 - `MaterialElement`: `Name`, `Color` (`Vector4?`), `TextureFile` (the raw reference string).
 - `Joint`: `Name`, `Type`, `ParentLinkName`, `ChildLinkName`, `Origin` (`Matrix4x4`), `Axis`.
-  - `JointType`: `Fixed/Revolute/Continuous/Prismatic`. URDF `planar` / `floating` are not part of the model, and `limit` / `mimic` / `inertial` / `collision` are not parsed either — visualization only.
+  - `JointType`: `Fixed/Revolute/Continuous/Prismatic`. URDF `planar` / `floating` are not part of the model, and `limit` / `mimic` / `inertial` are not parsed; `collision` is parsed into `CollisionElement`.
   - A joint is "given a joint value → child link's transform relative to the parent link". Revolute/Continuous rotate around `Axis`; Prismatic translates along `Axis`; Fixed has no DOF.
 - `GeometryElement` base (a polymorphic record union; the pose lives on `VisualElement`, not here):
   - `BoxGeometry(Vector3 Size)`
@@ -96,7 +109,7 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 3. URDF (`Urdf/`)
 
-- `UrdfParser` (`internal`): `RobotDescription Parse(XDocument document, string? baseDirectory)`. Handles only visualization: robot/link/visual/geometry/material/joint (topology); explicitly ignores inertial/collision/transmission/gazebo; poses unified as row-major matrices; numbers parsed with `InvariantCulture`. Users enter via `RobotModel.Parse/ParseFile`.
+- `UrdfParser` (`internal`): `RobotDescription Parse(XDocument document, string? baseDirectory)`. Handles robot/link/visual/collision/geometry/material/joint (topology); explicitly ignores inertial/transmission/gazebo; poses unified as row-major matrices; numbers parsed with `InvariantCulture`. Users enter via `RobotModel.Parse/ParseFile`.
 - `UrdfParseException` (`public`): thrown on parse failure; the message includes element/attribute context to help locate the file.
 
 ### `IAssetResolver` / `FileSystemAssetResolver`

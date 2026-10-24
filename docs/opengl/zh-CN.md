@@ -41,8 +41,8 @@ public static class GraphicsFactory
 ### `Renderer`（`IRenderer` 实现）
 `Render(scene)` 遍历场景，把「数据 → GPU 资源」实例化并绘制。它拥有所有网格/材质/纹理缓存与释放生命周期。遍历在不可见节点处终止（`GameObject.Visible == false`）：该节点与其整棵子树既不绘制也不继续下探；不可见 `Light` 不进灯光收集，不贡献任何着色。
 
-- 按 `RenderPassKind`（Model/Line/Point/Axes）分发；`Skybox` 为场景级未来背景通道，不由普通节点绘制。
-- 一帧分两趟绘制，由**深度策略**排序。普通遍历把所有节点按深度测试画掉，只有一个例外：`Axes.AlwaysOnTop` 打开的坐标轴系**完全不在这里绘制**——它整棵子树只入队。若有轴系入队，渲染器随后清一次深度缓冲再绘制它们，于是「对象自己的坐标系」这块标记在被标注的网格内部照样可见，而各轴系之间仍互相正确遮挡（两套重叠时近的那套胜出）。保持默认的轴系（`FixedWorldLength` 的尺子）就是普通几何，照旧会被遮挡。此后除下面的角落 gizmo 之外不再绘制任何东西。
+- 按 `RenderPassKind`（Model/Line/Point/Axes/Debug）分发；`Skybox` 为场景级未来背景通道，不由普通节点绘制。`Debug` 在场景画完后以半透明混合、关闭深度测试绘制，用于碰撞体等诊断体积。
+- 一帧按**深度策略**分几步绘制。普通遍历把所有节点按深度测试画掉，只有两类例外：`RenderPassKind.Debug` 节点只入队、`Axes.AlwaysOnTop` 打开的坐标轴系整棵子树只入队。普通场景画完后先画 Debug（半透明混合、关闭深度测试、关闭深度写入），再清一次深度缓冲画 on-top 轴系，于是碰撞体不会被模型埋掉，「对象自己的坐标系」标记在被标注的网格内部照样可见，而各轴系之间仍互相正确遮挡（两套重叠时近的那套胜出）。保持默认的轴系（`FixedWorldLength` 的尺子）就是普通几何，照旧会被遮挡。最后才画下面的角落 gizmo。
 - 场景画完后，若 `SceneGraph.ShowOrientationGizmo` 打开，再画一趟朝向 gizmo（三支 RGB 箭头 + 原点小球，几何走 axes 通道，**不带背景底盘**）：它占视口右下角一个自己的方形视口（深度清理限定在 `glScissor` 框内，因为 `glClear` 不受视口影响），相机只取场景相机朝向、配正交投影 → 相机远近与缩放都不改变它的像素尺寸；而方块边长本身是按**视口较短边的固定比例**取的（`Renderer.GizmoSizeRatio`，带像素上下限 `GizmoMinSize` / `GizmoMaxSize`），所以窗口变大时标记同比例变大，而不是一个固定像素的方块；因此它永不被几何遮挡、也永不参与拾取。画完会把视口恢复为整屏——宿主可能只在尺寸变化时才设置视口。
 - 灯光参数（`MaxLights = 8`）每帧收集并写入模型着色器 uniform 数组。超出上限的可见灯会被丢弃（着色器的 uniform 数组就这么宽），并在**溢出期间记一次** `Logger.Warning`（场景重新装得下之后自动复位，下次溢出会再报），所以「运行时往场景里加灯」不会变成静默少光。
 - `HighlightBlend = 0.30f`：高亮混合系数。
@@ -66,7 +66,7 @@ public static class GraphicsFactory
 | `Material` | GPU 材质：持有着色器与已上传纹理；`Apply(MaterialData)` 写入外观参数 |
 | `Texture2D` | GPU 二维纹理：从`TextureReference`（文件或内存）创建，按 `TextureColorSpace` 决定 sRGB/线性内格式；可生成 mipmap |
 | `ShaderProgram` | 着色器程序与 uniform 缓存；`Use()` / `SetUniform(...)`（多样式重载）；可经 `ShaderProgram(gl, vertex, geometry, fragment)` 带一个可选几何着色器阶段（传 `null` 即省略） |
-| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes `.vert/.frag`；Line 另有 `.geom`，把线段扩成屏幕空间四边形）；`Get(pass)` 返回 `(Vertex, Geometry, Fragment)`，无该阶段的 pass 其 `Geometry` 为 null |
+| `EmbeddedShaders` | 标准着色器目录：从嵌入资源读取各 pass 的 GLSL（Model/Line/Point/Skybox/Axes/Debug `.vert/.frag`；Line 另有 `.geom`，把线段扩成屏幕空间四边形）；`Get(pass)` 返回 `(Vertex, Geometry, Fragment)`，无该阶段的 pass 其 `Geometry` 为 null |
 
 > 端点：着色器源文件位于本程序集 `Shaders/` 目录，作为嵌入式资源打包；`Core` 只约定 `RenderPassKind`，宿主无需管理着色器路径。
 
@@ -77,7 +77,7 @@ public static class GraphicsFactory
 `OpenGL` 把**着色管线**当作核心来对待——像游戏引擎那样可自定义，但又避免整引擎的沉重。`Core`/`Robot` 完全不感知 GLSL，约定只在 `RenderPassKind` 上。本节如实区分「当前已实现」与「规划的扩展方向」。
 
 **当前已实现**
-- 标准管线由 `EmbeddedShaders` 提供并随程序集打包（Model / Line / Point / Skybox / Axes 的 `.vert/.frag`，外加 Line 的 `.geom`），宿主无需管理着色器文件路径。
+- 标准管线由 `EmbeddedShaders` 提供并随程序集打包（Model / Line / Point / Skybox / Axes / Debug 的 `.vert/.frag`，外加 Line 的 `.geom`），宿主无需管理着色器文件路径。`Debug` 是无光照的纯色填充，Renderer 在其通道内开启混合、关闭深度测试并禁用背面剔除。
 - `Renderer` 在启动时从 `EmbeddedShaders.Get(pass)` 编译全部标准 pass 着色器（见其构造函数；`GetPassShader(pass)` 为 `internal`）。
 - 模型节点绘制使用 `Material.Shader`（当前由 `Renderer` 以标准 `_modelShader` 创建，见 `CreateMaterial`），材质参数经 `Material.Apply(MaterialData)` 写入 uniform。
 - 灯（`MaxLights = 8`）与高亮（`HighlightBlend`）由 `Renderer` 收集并写入 uniform 数组，供模型着色器消费。

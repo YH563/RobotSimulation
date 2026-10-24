@@ -5,8 +5,8 @@ namespace RobotSimulation.Robot.Description;
 /// <summary>
 /// Aggregate root of a robot's static description, parsed from URDF (or future import formats).
 /// Pure data, zero rendering dependencies, serializable; holds no runtime state (joint angles, global
-/// poses, etc. belong to the Robot/State layer). This description only covers visualization-relevant
-/// information and ignores physical parameters like inertia.
+/// poses, etc. belong to the Robot/State layer). This description covers visualization and collision
+/// geometry and ignores physical parameters like inertia.
 /// </summary>
 public sealed class RobotDescription
 {
@@ -124,6 +124,9 @@ public sealed record Link
 
     /// <summary>Visual elements mounted in this link's frame (a URDF link may have multiple visuals).</summary>
     public List<VisualElement> VisualElements { get; init; } = new();
+
+    /// <summary>Collision elements mounted in this link's frame (a URDF link may have multiple collision shapes).</summary>
+    public List<CollisionElement> CollisionElements { get; init; } = new();
 }
 
 /// <summary>

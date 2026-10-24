@@ -15,6 +15,7 @@ using RobotSimulation.Core.Utils;
 using RobotSimulation.OpenGL.Device;
 using RobotSimulation.OpenGL.Rendering;
 using RobotSimulation.Robot;
+using RobotSimulation.Robot.Collision;
 using Silk.NET.OpenGL;
 
 namespace AvaloniaTest.Controls;
@@ -87,6 +88,7 @@ public class RobotViewportControl : OpenGlControlBase
     private IRenderContext? _graphics;
     private IRenderer? _renderer;
     private SceneGraph? _scene;
+    private RobotCollisionDebugView? _collisionView;
 
     private string? _initError;
     private TimeSpan _lastFrameTime;
@@ -140,15 +142,31 @@ public class RobotViewportControl : OpenGlControlBase
     /// a host never fails because of test data — and the logged wording is identical to the bare-window
     /// host's, which is what makes the two console logs diffable line by line.
     /// </summary>
-    private static void LoadRobot(SceneGraph scene)
+    private static RobotModel? LoadRobot(SceneGraph scene)
     {
         Logger.Info($"Test data: {Path.GetFullPath(AssetsRelativePath, AppContext.BaseDirectory)}");
 
         if (ResolveAssetFile(ModelRelativePath) is not { } modelPath)
-            return;
+            return null;
 
         Logger.Info($"Loading model: {modelPath}");
-        scene.Add(RobotModel.ParseFile(modelPath));
+        RobotModel robot = RobotModel.ParseFile(modelPath);
+        scene.Add(robot);
+        return robot;
+    }
+
+    /// <summary>
+    /// Toggles the translucent collision-shape view. Returns the new visibility; false when no robot was
+    /// loaded. The view follows joint motion automatically because its fills are mounted under the links.
+    /// </summary>
+    public bool ToggleCollisionDebug()
+    {
+        if (_collisionView is null)
+            return false;
+
+        _collisionView.Visible = !_collisionView.Visible;
+        Logger.Info($"Collision debug: {(_collisionView.Visible ? "on" : "off")}");
+        return _collisionView.Visible;
     }
 
     /// <summary>
@@ -194,7 +212,13 @@ public class RobotViewportControl : OpenGlControlBase
             // lights, world axes and a usable camera pose all come from its constructor) plus the one
             // URDF robot — only the way GL was obtained above differs between the two hosts.
             _scene = new SceneGraph();
-            LoadRobot(_scene);
+            RobotModel? robot = LoadRobot(_scene);
+            if (robot is not null)
+            {
+                _collisionView = robot.CollisionModel.CreateDebugView();
+                _collisionView.Visible = Program.SmokeFrames > 0;
+                Logger.Info($"Collision debug: {(_collisionView.Visible ? "on" : "off")} (press C to toggle)");
+            }
         }
         catch (Exception ex)
         {
@@ -287,11 +311,13 @@ public class RobotViewportControl : OpenGlControlBase
     protected override void OnOpenGlDeinit(GlInterface gl)
     {
         // Release GPU resources while the context is still current, then the GL facade itself.
+        _collisionView?.Dispose();
         _renderer?.Dispose();
         _scene?.Dispose();
         _graphics?.Dispose();
         _gl?.Dispose();
 
+        _collisionView = null;
         _renderer = null;
         _scene = null;
         _graphics = null;

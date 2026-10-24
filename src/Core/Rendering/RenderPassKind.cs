@@ -26,4 +26,11 @@ public enum RenderPassKind
     /// neither grows with parent scale nor shrinks with camera distance.
     /// </summary>
     Axes = 4,
+
+    /// <summary>
+    /// Unlit translucent debug fill (collision volumes, trigger zones). These nodes are drawn after the
+    /// opaque scene with alpha blending and no depth test, so a debug volume stays visible through the
+    /// geometry it annotates. Intended for diagnostics, not for product geometry.
+    /// </summary>
+    Debug = 5,
 }

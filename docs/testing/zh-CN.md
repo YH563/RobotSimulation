@@ -1,6 +1,6 @@
 # 测试数据指南
 
-`Tests/BareWindowTest` 与 `Tests/AvaloniaTest` 是本仓库的端到端检查，同时也是**最小的嵌入示例**：两者各自把**一个 URDF 机器人**装进一个默认场景、渲染出来，并打印一份两个宿主共用的日志。窗口里只有三件事——轨道相机（左键拖拽旋转 / 中键平移 / 右键或滚轮缩放）、点击选中（高亮 + 挂上该部件的自身坐标系——画在几何之上，网格埋不掉它；纯显示不可拖动）、以及库自带的地面网格，右下角还有渲染器绘制的屏幕空间朝向 gizmo（世界坐标轴默认关闭，需要时手动开）。**点击与拖拽以 6 像素为界**：指针在阈值内按下再松开算一次点击，越界才算拖拽。点击**不会移动相机**——宿主先把相机恢复为按下时的姿态快照，再按用户当时看到的那一帧发射拾取射线；否则几像素的手抖就会让「点在这一帧的部件上」变成「射线早已偏到部件之外」。本文只讲这**一个文件**：它放在哪、从哪来、怎么换。
+`Tests/BareWindowTest` 与 `Tests/AvaloniaTest` 是本仓库的端到端检查，同时也是**最小的嵌入示例**：两者各自把**一个 URDF 机器人**装进一个默认场景、渲染出来，并打印一份两个宿主共用的日志。窗口里只有三件事——轨道相机（左键拖拽旋转 / 中键平移 / 右键或滚轮缩放）、点击选中（高亮 + 挂上该部件的自身坐标系——画在几何之上，网格埋不掉它；纯显示不可拖动）、以及库自带的地面网格，右下角还有渲染器绘制的屏幕空间朝向 gizmo（世界坐标轴默认关闭，需要时手动开）。按 `C` 切换半透明碰撞体显示（smoke 模式下默认打开，以覆盖 Debug 通道）。**点击与拖拽以 6 像素为界**：指针在阈值内按下再松开算一次点击，越界才算拖拽。点击**不会移动相机**——宿主先把相机恢复为按下时的姿态快照，再按用户当时看到的那一帧发射拾取射线；否则几像素的手抖就会让「点在这一帧的部件上」变成「射线早已偏到部件之外」。本文只讲这**一个文件**：它放在哪、从哪来、怎么换。
 
 ## 1. 数据放在哪里
 
@@ -170,6 +170,10 @@ FPS 行里的数字本就是每次测量的结果，所以脚本把它归一化�
 | 类 | 覆盖 |
 | --- | --- |
 | `SceneGraphThreadingTests` | 场景的线程契约（10 项无头检查）：属主只声明一次、非属主线程调用帧边界抛异常、跨线程 `Add` / `Remove` 与 `Transform.Parent` 入队并在帧边界提交、队列上限与丢弃计数、根节点随父节点迁出 `Roots` |
+| `CollisionShapeTests` | 图元碰撞：球/盒/胶囊/圆柱近似、相切/分离/穿透、旋转与 AABB、`CollisionEnabled` 与 predicate |
+| `CollisionMeshTests` | 三角形 BVH、网格-网格 / 网格-图元、`MeshData.Revision` 重建、`MeshSink` 的 collision 开关 |
+| `UrdfCollisionTests` | `<collision>` 解析、origin、自碰撞邻接过滤、关节驱动后碰撞状态变化、DebugView 节点 |
+| `CollisionDebugTests` | Debug pass 的填充/描边节点、材质、接触标记与内嵌 shader |
 | `BareWindowTests` | 宿主窗口的目视 / 手工检查：真开一个 GL 窗口、跑主循环并放两个盒子进去，窗口关闭才返回（需要显示设备，CI 不跑） |
 
 ```bash
@@ -180,9 +184,9 @@ dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifi
 dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName~BareWindowTests"
 ```
 
-这两类检查都不需要资源文件：`SceneGraphThreadingTests` 只是对象图，`BareWindowTests` 只用几何图元（`Box`）搭场景，所以这个工程里既没有 `Assets` 目录，也没有把宿主的测试数据拷到输出目录的步骤。
+这些检查都不需要资源文件：线程测试只是对象图，碰撞测试在内存里构造 `MeshData` / 内联 URDF，`BareWindowTests` 只用几何图元（`Box`）搭场景，所以这个工程里既没有 `Assets` 目录，也没有把宿主的测试数据拷到输出目录的步骤。
 
-早先那 37 项用例（`AssetResolverTests` / `RobotModelAssetResolutionTests` / `PickingTests` / `DefaultSceneTests` 与 `TestAssets` 夹具）随旧 `src/RobotSimulation.Tests/` 目录一并删除。其中「点击落在哪个 link 上」由 Avalonia 宿主的 `--smoke` 自检（见上文）覆盖；URDF 解析、`IAssetResolver` 的路径解析、几何图元与射线拾取的边界行为目前没有自动化检查，改动这些地方时请手动跑两个宿主。
+早先那 37 项用例（`AssetResolverTests` / `RobotModelAssetResolutionTests` / `PickingTests` / `DefaultSceneTests` 与 `TestAssets` 夹具）随旧 `src/RobotSimulation.Tests/` 目录一并删除；现在碰撞形状 / 网格 / URDF collision / 自碰撞已由上面的类补回。其中「点击落在哪个 link 上」由 Avalonia 宿主的 `--smoke` 自检（见上文）覆盖；`IAssetResolver` 的路径解析与射线拾取的边界行为仍主要靠手动跑两个宿主。
 
 mesh 导入**不需要任何运行时初始化**：Assimp 的原生库随 `Silk.NET.Assimp` 包按 RID 分发，宿主什么都不必准备（早先 `AssimpNet` 时代那个 Linux `libdl.so` 兼容补丁已随依赖一起删除），因此本工程里没有任何模块初始化代码。
 

@@ -4,7 +4,7 @@
 its **smallest embedding example**: each loads **one URDF robot** into a default scene, renders it, and
 prints a log both hosts share. The window has exactly three behaviours — an orbit camera (left-drag
 rotate, middle-drag pan, right-drag or the wheel zoom), pick-to-select (highlight plus the picked link's own local axes, drawn on top of the mesh), and the library's own grid
-floor plus its screen-space orientation gizmo in the bottom-right corner. **Six pixels separate a click from a drag**: press and release inside that
+floor plus its screen-space orientation gizmo in the bottom-right corner. Press `C` to toggle the translucent collision-shape view (on by default in smoke mode so the Debug pass is exercised). **Six pixels separate a click from a drag**: press and release inside that
 threshold is a click, anything beyond it is a drag. A click **does not move the camera** — the host
 restores the pose snapshot taken at press time and only then casts the ray, so that it is cast through
 the frame the user clicked on; otherwise a few pixels of hand jitter would turn "the link under this
@@ -261,6 +261,10 @@ The two hosts prove that the *render pipeline comes up*. `Tests/RobotSimulation.
 | Class | Covers |
 | --- | --- |
 | `SceneGraphThreadingTests` | the scene's threading contract (10 headless checks): the owner is claimed once, an off-owner call at a frame boundary throws, cross-thread `Add` / `Remove` and `Transform.Parent` queue up and commit at a frame boundary, the queue cap and its drop counter, a root leaving `Roots` when it gains a parent |
+| `CollisionShapeTests` | primitive collision: sphere/box/capsule/cylinder approximation, touching/separation/penetration, rotation and AABB, `CollisionEnabled` and predicates |
+| `CollisionMeshTests` | triangle BVH, mesh/mesh and mesh/primitive queries, `MeshData.Revision` rebuilds, and `MeshSink`'s collision switch |
+| `UrdfCollisionTests` | `<collision>` parsing, origin, self-collision adjacency, collision changes after joint driving, debug-view nodes |
+| `CollisionDebugTests` | Debug-pass fill/outline nodes, materials, contact markers and the embedded shader |
 | `BareWindowTests` | a visual / manual check of the host window: it really opens a GL window, runs the loop with two boxes in it and returns when the window closes (needs a display, so CI skips it) |
 
 ```bash
@@ -271,16 +275,17 @@ dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifi
 dotnet test Tests/RobotSimulation.Tests.csproj -c Release --filter "FullyQualifiedName~BareWindowTests"
 ```
 
-Neither needs asset files: `SceneGraphThreadingTests` is object-graph only and `BareWindowTests` builds its
-scene from a geometry primitive (`Box`), so this project has no `Assets` directory and no step that copies
-the hosts' test data to the output directory.
+None of these needs asset files: the threading tests are object-graph only, the collision tests build
+`MeshData` / inline URDF strings in memory, and `BareWindowTests` builds its scene from a geometry
+primitive (`Box`), so this project has no `Assets` directory and no step that copies the hosts' test data
+to the output directory.
 
 The earlier 37-check suite (`AssetResolverTests` / `RobotModelAssetResolutionTests` / `PickingTests` /
 `DefaultSceneTests` and the `TestAssets` fixture) went away together with the old
-`src/RobotSimulation.Tests/` directory. "Which link a click lands on" is covered today by the Avalonia
-host's `--smoke` self-check (see above); URDF parsing, `IAssetResolver` path resolution and the edge
-behaviour of geometry primitives / ray picking have no automated checks right now, so run both hosts by
-hand when you touch those.
+`src/RobotSimulation.Tests/` directory; collision shapes / meshes / URDF collision / self-collision are
+now covered again by the classes above. "Which link a click lands on" is covered by the Avalonia host's
+`--smoke` self-check (see above); `IAssetResolver` path resolution and the edge behaviour of ray picking
+still rely mainly on running both hosts by hand.
 
 Mesh import needs no runtime initialization at all: Assimp's native library ships per-RID inside the
 `Silk.NET.Assimp` package, so a host has nothing to prepare (the Linux `libdl.so` compatibility patch from

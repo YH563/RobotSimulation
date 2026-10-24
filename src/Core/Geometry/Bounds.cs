@@ -50,4 +50,40 @@ public readonly struct Bounds
         }
         return new Bounds(min, max);
     }
+
+    /// <summary>Whether two boxes overlap (touching counts as overlap).</summary>
+    public bool Intersects(in Bounds other)
+        => Min.X <= other.Max.X && Max.X >= other.Min.X
+           && Min.Y <= other.Max.Y && Max.Y >= other.Min.Y
+           && Min.Z <= other.Max.Z && Max.Z >= other.Min.Z;
+
+    /// <summary>Returns this box grown by <paramref name="margin"/> on every axis.</summary>
+    /// <param name="margin">Non-negative margin in world units.</param>
+    public Bounds Expanded(float margin)
+    {
+        var extent = new Vector3(margin);
+        return new Bounds(Min - extent, Max + extent);
+    }
+
+    /// <summary>
+    /// Computes the AABB of this box after an affine transform (all eight corners are transformed, so a
+    /// rotated or scaled box yields a conservative world-space box).
+    /// </summary>
+    public Bounds Transformed(in Matrix4x4 matrix)
+    {
+        Vector3 min = new(float.PositiveInfinity);
+        Vector3 max = new(float.NegativeInfinity);
+        for (int corner = 0; corner < 8; corner++)
+        {
+            var local = new Vector3(
+                (corner & 1) == 0 ? Min.X : Max.X,
+                (corner & 2) == 0 ? Min.Y : Max.Y,
+                (corner & 4) == 0 ? Min.Z : Max.Z);
+            Vector3 world = Vector3.Transform(local, matrix);
+            min = Vector3.Min(min, world);
+            max = Vector3.Max(max, world);
+        }
+
+        return new Bounds(min, max);
+    }
 }

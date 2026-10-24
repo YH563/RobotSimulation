@@ -8,7 +8,7 @@ namespace RobotSimulation.OpenGL.Resources;
 
 /// <summary>
 /// Standard shader catalog: the GLSL source files live in this assembly's <c>Shaders/</c> directory
-/// (Model/Line/Point/Skybox/Axes each with a .vert/.frag; the Line pass also has a .geom that expands
+/// (Model/Line/Point/Skybox/Axes/Debug each with a .vert/.frag; the Line pass also has a .geom that expands
 /// segments to screen-space quads), distributed as embedded resources with RobotSimulation.OpenGL. The
 /// Core side only agrees on the <see cref="RenderPassKind"/> passes; the host needs no shader file
 /// paths. Edit GLSL directly under <c>Shaders/*.vert|geom|frag</c>.
@@ -25,6 +25,7 @@ public static class EmbeddedShaders
         RenderPassKind.Point => (Read("Point.vert"), null, Read("Point.frag")),
         RenderPassKind.Skybox => (Read("Skybox.vert"), null, Read("Skybox.frag")),
         RenderPassKind.Axes => (Read("Axes.vert"), null, Read("Axes.frag")),
+        RenderPassKind.Debug => (Read("Debug.vert"), null, Read("Debug.frag")),
         _ => throw new ArgumentOutOfRangeException(nameof(pass)),
     };
 

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using RobotSimulation.Core.Utils;
 
 namespace AvaloniaTest.Views;
@@ -21,6 +22,14 @@ public partial class MainWindow : Window
         Viewport.Message += message => HintText.Text = message;
         Viewport.InitializationFailed += OnInitializationFailed;
         Viewport.SmokeCompleted += OnSmokeCompleted;
+        KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.C)
+                return;
+
+            Viewport.ToggleCollisionDebug();
+            e.Handled = true;
+        };
 
         // The command line was parsed once in Program, by the same parser the bare-window host uses.
         if (Program.SmokeFrames > 0)

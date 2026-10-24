@@ -14,7 +14,7 @@
              latest user-facing message (e.g. the pick result). -->
         <StackPanel Grid.Row="1" Margin="12" Spacing="4">
             <TextBlock x:Name="HintText"
-                       Text="Left-drag rotate | Middle-drag pan | Right-drag or wheel zoom | Left-click pick" />
+                       Text="Left-drag rotate | Middle-drag pan | Right-drag or wheel zoom | Left-click pick | C toggle collision debug" />
         </StackPanel>
 
     </Grid>

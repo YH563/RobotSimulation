@@ -14,8 +14,8 @@
         <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
              the repo-root Directory.Build.props. -->
         <PackageId>RobotSimulation.Core</PackageId>
-        <Description>Engine kernel for RobotSimulation: scene object model (GameObject / Transform / SceneGraph / Camera / Light), pure-CPU geometry and model import (MeshData, AssimpModelLoader), render abstraction with material and texture description, point clouds (PCD / PLY) and utilities. Zero graphics API, zero UI framework.</Description>
-        <PackageTags>robot;3d;scene-graph;geometry;mesh;assimp;point-cloud;visualization</PackageTags>
+        <Description>Engine kernel for RobotSimulation: scene object model (GameObject / Transform / SceneGraph / Camera / Light), pure-CPU geometry and model import (MeshData, AssimpModelLoader), collision shapes and geometry queries (AABB broad phase, primitive narrow phase, triangle BVH), render abstraction with material and texture description, point clouds (PCD / PLY) and utilities. Zero graphics API, zero UI framework.</Description>
+        <PackageTags>robot;3d;scene-graph;geometry;mesh;collision;assimp;point-cloud;visualization</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

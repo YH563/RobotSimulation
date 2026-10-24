@@ -7,6 +7,7 @@ using RobotSimulation.Core.Scene;
 using RobotSimulation.Core.Utils;
 using RobotSimulation.OpenGL.Device;
 using RobotSimulation.Robot;
+using RobotSimulation.Robot.Collision;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -79,6 +80,7 @@ public static class Program
     private static IRenderContext _graphics = null!;
     private static IRenderer _renderer = null!;
     private static SceneGraph _scene = null!;
+    private static RobotCollisionDebugView? _collisionView;
 
     // The framebuffer GL actually draws into, in pixels. Silk reports it separately from the window size, and
     // on a scaled display the two are not the same rectangle. The renderer, the camera aspect and the pick ray
@@ -224,7 +226,12 @@ public static class Program
             return;
 
         Logger.Info($"Loading model: {modelPath}");
-        scene.Add(RobotModel.ParseFile(modelPath));
+        RobotModel robot = RobotModel.ParseFile(modelPath);
+        scene.Add(robot);
+
+        _collisionView = robot.CollisionModel.CreateDebugView();
+        _collisionView.Visible = _framesToRender > 0;
+        Logger.Info($"Collision debug: {(_collisionView.Visible ? "on" : "off")} (press C to toggle)");
     }
 
     /// <summary>
@@ -438,12 +445,22 @@ public static class Program
     private static void OnKeyDown(IKeyboard keyboard, Key key, int code)
     {
         if (key == Key.Escape)
+        {
             _window.Close();
+            return;
+        }
+
+        if (key == Key.C && _collisionView is not null)
+        {
+            _collisionView.Visible = !_collisionView.Visible;
+            Logger.Info($"Collision debug: {(_collisionView.Visible ? "on" : "off")}");
+        }
     }
 
     private static void OnClosing()
     {
         _input?.Dispose();
+        _collisionView?.Dispose();
         _renderer?.Dispose(); // GPU resources are released while the context is still alive.
         _scene?.Dispose();
         _graphics?.Dispose();

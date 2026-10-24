@@ -21,6 +21,8 @@ A scene node. It holds only scene data (Transform, CPU model data, CPU material)
 | `PointData` | `PointCloud2Data?` | Point cloud (with `RenderPassKind.Point`) |
 | `PointSize` | `float` | Pixel size of the point pass (`GL_POINTS`), default 3 |
 | `LineWidth` | `float` | Pixel width of the line pass (`GL_LINES`), default 1. The backend expands each segment into a screen-space quad so the width is constant on screen |
+| `CollisionShapes` | `IReadOnlyList<CollisionShapeInstance>` | Collision shapes mounted on this node (read-only; mutate via `AddCollisionShape`) |
+| `CollisionEnabled` | `bool` | Whether this node and its descendants participate in collision queries (subtree switch, default true) |
 | `ShowLocalAxes` | `bool` | Whether to attach local axes (auto sub-object). The set is created with `AlwaysOnTop = true`: the marker annotates a node whose own mesh surrounds it, so it is drawn after the scene and no geometry can bury it |
 | `LocalAxesLength` | `float` | Default local axes length, default 0.3 |
 | `LocalAxes` | `Axes?` | Attached local axes (non-null when enabled; tune it here — `AlwaysOnTop = false` gets the ordinary, occludable set back) |
@@ -164,6 +166,19 @@ All `GameObject` subclasses; the ctor generates CPU mesh + material, ready for `
 ### `Bounds`
 - Ctor `Bounds(Vector3 min, Vector3 max)` (no validation; the caller guarantees `min <= max`), `static Bounds FromPoints(IEnumerable<Vector3>)` (an empty set yields the empty box `Min = Max = 0`).
 - Properties `Min` / `Max` / `Center` / `Size`.
+- Methods `Intersects(in Bounds)` (touching counts), `Expanded(float)`, and `Transformed(in Matrix4x4)` (transforms all eight corners into a conservative world AABB).
+
+### Collision queries (geometry only)
+Namespace `RobotSimulation.Core.Geometry.Collision` / `RobotSimulation.Core.Scene`. These are geometric queries only; no physics response, integration or contact manifold.
+
+- Shapes: `BoxShape` (full size), `SphereShape`, `CapsuleShape` (`Length` is the middle cylinder segment), `CylinderShape` (treated as a capsule in the first narrow phase), `MeshShape` (lazily builds a triangle BVH, rebuilt when `MeshData.Revision` changes).
+- `CollisionShapeInstance(Shape, LocalPose)`: world pose is `LocalPose * owner.Transform.GetModelMatrix()`.
+- `GameObject`: `CollisionShapes` (read-only), `CollisionEnabled` (subtree switch), `AddCollisionShape(shape, localPose?)`, `ClearCollisionShapes()`.
+- `CollisionQuery.TryGetContact(shapeA, worldA, shapeB, worldB, out ShapeContact)`: low-level narrow phase; `ShapeContact` carries an approximate point, an A→B normal and penetration depth.
+- Scale convention: Box/Mesh use the full world matrix; Sphere/Capsule/Cylinder take the largest world-scale axis for their radius and the Z-axis scale for capsule/cylinder length. Robot links have scale 1 and are unaffected.
+- `CollisionQuery.Detect(SceneGraph, predicate?)`: AABB broad phase + narrow phase, returning `CollisionContact` items; call it on the scene owner thread.
+- `MeshSink`'s `enableCollision` constructor argument and `SetCollisionEnabled(bool)` give every incrementally reconstructed chunk a `MeshShape`; geometry updates rebuild the BVH through the revision.
+- `CollisionDebug`: Godot-style translucent debug fills through `RenderPassKind.Debug`; `CreateFill` / `CreateLocalFill` build volumes with a soft wireframe outline for primitives (`DefaultColor` low-opacity blue-grey fill + `DefaultOutlineColor` soft blue-grey edge), and `CreateContactMarker` draws a normal marker. Mesh shapes draw their own mesh without an extra outline.
 
 ### Point cloud `PointCloud2Data` / `PointField` / `PointFieldDataType`
 ROS `sensor_msgs/PointCloud2` style: a flat byte buffer + field descriptions. Each point occupies `PointStep` bytes; channels (x/y/z/rgb/intensity) are located by `PointField` (offset + datatype + count). Position channels (x/y/z) are required; color is optional, resolved by rgb/rgba → per-channel r/g/b → intensity (grey) priority.
@@ -314,7 +329,7 @@ CPU-side texture reference describing only "which file, what semantics", holding
 - `enum TextureColorSpace { Srgb, Linear }`
 
 ### `RenderPassKind`
-`Model=0, Line=1, Point=2, Skybox=3, Axes=4`. `Core` only defines "which passes exist"; each pass's GLSL implementation is supplied by the backend `EmbeddedShaders`.
+`Model=0, Line=1, Point=2, Skybox=3, Axes=4, Debug=5`. `Core` only defines "which passes exist"; each pass's GLSL implementation is supplied by the backend `EmbeddedShaders`. `Debug` is an unlit, depth-independent translucent fill for diagnostics such as collision volumes.
 
 ---
 

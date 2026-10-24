@@ -10,10 +10,11 @@
     cylinder_link  <cylinder radius="0.18" length="0.5"/>
     capsule_link   <capsule  radius="0.14" length="0.4"/>
 
-  Each link also carries <collision> and <inertial> blocks: they must be parsed correctly but never
-  drawn, which is why the visuals are given explicit names and robot-level <material> colors. The
-  links hang off box_link through fixed joints spaced 0.8 m apart — the robot tree needs exactly one
-  root link, and the spacing makes the four primitives visible side by side.
+  Each link also carries <collision> and <inertial> blocks: collision geometry is parsed for queries,
+  inertial is ignored by this visualization/collision model, and neither is drawn as a visual.
+  The visuals are given explicit names and robot-level <material> colors. The links hang off
+  box_link through fixed joints spaced 0.8 m apart — the robot tree needs exactly one root link,
+  and the spacing makes the four primitives visible side by side.
 -->
 <robot name="urdf_primitives_demo">
 

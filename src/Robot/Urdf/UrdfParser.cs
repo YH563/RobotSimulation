@@ -13,8 +13,8 @@ namespace RobotSimulation.Robot.Urdf;
 /// URDF text → <see cref="RobotDescription"/> parser (internal type). Used via the <see cref="RobotModel"/> facade.
 ///
 /// Responsibility and scope:
-///  - Visualization only: robot / link / visual / geometry / material / joint (topology);
-///  - Ignores physical and extension content such as inertial / collision / transmission / gazebo;
+///  - Geometry and topology: robot / link / visual / collision / geometry / material / joint;
+///  - Ignores physical and extension content such as inertial / transmission / gazebo;
 ///  - Poses are unified into row-major matrices (consistent with Core.Scene.Transform);
 ///  - All numbers are parsed InvariantCulture (URDF decimal point is always '.').
 /// </summary>
@@ -83,7 +83,10 @@ internal sealed class UrdfParser
         foreach (XElement visual in Children(element, "visual"))
             link.VisualElements.Add(ParseVisual(visual, materials));
 
-        // inertial / collision are explicitly ignored (this layer only handles visualization).
+        foreach (XElement collision in Children(element, "collision"))
+            link.CollisionElements.Add(ParseCollision(collision));
+
+        // inertial is explicitly ignored (this layer does not simulate physical properties).
         return link;
     }
 
@@ -102,6 +105,21 @@ internal sealed class UrdfParser
         };
 
         return visual;
+    }
+
+    private static CollisionElement ParseCollision(XElement element)
+    {
+        XElement? geometryElement = Child(element, "geometry");
+        if (geometryElement is null)
+            throw new UrdfParseException(
+                $"link's &lt;collision&gt; lacks &lt;geometry&gt; (in link '{element.Parent?.Attribute("name")?.Value}').");
+
+        return new CollisionElement
+        {
+            Name = (string?)element.Attribute("name"),
+            LocalTransform = ParseOrigin(Child(element, "origin")),
+            Geometry = ParseGeometry(geometryElement),
+        };
     }
 
     /// <summary>

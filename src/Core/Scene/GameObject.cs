@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using RobotSimulation.Core.Geometry;
+using RobotSimulation.Core.Geometry.Collision;
 using RobotSimulation.Core.Geometry.Import;
 using RobotSimulation.Core.Rendering;
 
@@ -58,6 +59,45 @@ public class GameObject
     /// The backend expands each segment into a screen-space quad, so the width stays constant on screen.
     /// </summary>
     public float LineWidth { get; set; } = 1f;
+
+    /// <summary>
+    /// Collision shapes mounted on this node, in attach order. Empty by default; the collection is
+    /// read-only and changed through <see cref="AddCollisionShape"/> / <see cref="ClearCollisionShapes"/>.
+    /// </summary>
+    public IReadOnlyList<CollisionShapeInstance> CollisionShapes
+        => _collisionShapes ?? (IReadOnlyList<CollisionShapeInstance>)Array.Empty<CollisionShapeInstance>();
+
+    /// <summary>
+    /// Whether this node and its descendants participate in collision queries. Like <see cref="Visible"/>,
+    /// this is a subtree switch: a disabled node ends the collision traversal.
+    /// </summary>
+    public bool CollisionEnabled { get; set; } = true;
+
+    private List<CollisionShapeInstance>? _collisionShapes;
+
+    /// <summary>
+    /// Mounts a collision shape with an optional local pose. The world pose is
+    /// <c>localPose * Transform.GetModelMatrix()</c>.
+    /// </summary>
+    /// <param name="shape">Collision shape to mount.</param>
+    /// <param name="localPose">Pose relative to this node; null uses the identity.</param>
+    /// <returns>The mounted instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="shape"/> is null.</exception>
+    public CollisionShapeInstance AddCollisionShape(CollisionShape shape, Matrix4x4? localPose = null)
+    {
+        if (shape is null)
+            throw new ArgumentNullException(nameof(shape));
+
+        var instance = new CollisionShapeInstance(shape, localPose ?? Matrix4x4.Identity);
+        (_collisionShapes ??= new List<CollisionShapeInstance>()).Add(instance);
+        return instance;
+    }
+
+    /// <summary>Removes every collision shape from this node (descendants are unaffected).</summary>
+    public void ClearCollisionShapes()
+    {
+        _collisionShapes?.Clear();
+    }
 
     /// <summary>
     /// This node's local coordinate axes (child object): when enabled, a small RGB axes set is attached

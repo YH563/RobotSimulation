@@ -1,6 +1,6 @@
 # RobotSimulation Architecture (English)
 
-> Status: v0.1 reflecting the current implementation. Companion: `../../README.md`, `../core/en.md`, `../robot/en.md`, `../opengl/en.md`.
+> Status: v0.5.0 reflecting the current implementation. Companion: `../../README.md`, `../core/en.md`, `../robot/en.md`, `../opengl/en.md`.
 
 This document describes the architecture from the perspective of *publishable NuGet libraries*: package boundaries, dependency direction, the runtime/render threading model, key design decisions (ADRs), and extension points.
 
@@ -56,9 +56,9 @@ This document describes the architecture from the perspective of *publishable Nu
 
 | Package | Public responsibility | Depends on |
 |---|---|---|
-| `Core` | Scene object model, pure-CPU data, render abstraction interfaces, point-cloud/model import, utils | `Silk.NET.Assimp`, `Microsoft.Extensions.Logging` (`Logger`) |
-| `Robot` | Robot description / URDF / headless FK / `RobotModel` tree | `Core` |
-| `OpenGL` | Only render backend (device layer + renderer + GPU resources + shaders) | `Core` |
+| `Core` | Scene object model, pure-CPU data, collision shapes/queries, render abstraction interfaces, point-cloud/model import, utils | `Silk.NET.Assimp`, `Microsoft.Extensions.Logging` (`Logger`) |
+| `Robot` | Robot description / URDF / collision / headless FK / `RobotModel` tree and self-collision | `Core` |
+| `OpenGL` | Only render backend (device layer + renderer + GPU resources + shaders + Debug collision pass) | `Core` |
 
 **Rules**
 
@@ -79,6 +79,7 @@ Scene/          framework kernel: GameObject, Transform, SceneGraph, Camera, Lig
   Primitives/     ready-made nodes: Box/Sphere/Cylinder/Capsule/GroundPlane/Arrow/Axes/Grid/Curve/PointCloud
   Behaviors/      per-frame logic injection: IUpdateBehavior, DelegateUpdateBehavior
 Geometry/       pure CPU geometry: MeshData/LineData/VertexLayout, Primitives(internal), Ray/Raycast/Bounds
+  Collision/      collision geometry and narrow phase: CollisionShape (Box/Sphere/Capsule/Cylinder/Mesh), ShapeContact, TriangleBvh, NarrowPhase
   PointCloud/     point cloud: PointCloud2Data, PointField, PointFieldDataType, PointCloudIo
   Import/         Assimp import: AssimpModelLoader, LoadOptions, LoadedModel
 Rendering/      render abstraction: IRenderContext, IRenderer, MaterialData, TextureReference(+TextureColorSpace),
@@ -104,7 +105,7 @@ State/       RobotState (headless FK)
 Device/      GraphicsFactory (static composition root), GraphicsContext (IRenderContext)
 Rendering/   Renderer (IRenderer), RenderPassKind dispatch, lighting/highlight management
 Resources/   Mesh, LineMesh, PointMesh, Material, Texture2D, ShaderProgram, EmbeddedShaders
-Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag, plus Line .geom (packed as embedded resources)
+Shaders/     Model/Line/Point/Skybox/Axes/Debug .vert/.frag, plus Line .geom (packed as embedded resources)
 ```
 
 ---
@@ -138,6 +139,7 @@ Shaders/     Model/Line/Point/Skybox/Axes .vert/.frag, plus Line .geom (packed a
 | ADR-023 | Orientation feedback is split by kind: a scene axes set is a plain, occludable ruler (`AxesSizing.FixedWorldLength`, `FitWorldAxesToContent` sizes it past the model) while the renderer draws a screen-space gizmo in the viewport's bottom-right corner (own viewport + scissored depth clear, never occluded, never picked); the default scene ships with the world axes off and the gizmo on | "which way is X/Y/Z" is a UI question, "how big is a metre" is a scene question — answering each in its own space keeps one from ruining the other |
 | ADR-024 | Selection feedback is a pair, and the scene assembles it: `SceneGraph.Select` highlights the picked object *and* mounts that node's own local axes on it (non-pickable; `ShowSelectionAxes` on by default), while the renderer's corner gizmo stays a bare marker — three arrows and a hub ball, no backdrop. Both are **display only**: the library ships no drag affordance and the scene never writes back to a transform. The marker is drawn **on top of the geometry** (`Axes.AlwaysOnTop`): it is queued during the ordinary walk and drawn after one depth clear, so the mesh it annotates can no longer bury the very frame it is there to explain — while a world-scale ruler keeps the default and stays occludable | a highlight says *what* was picked but not which way that node's frame points, and axes at the world origin say nothing about a pick — both halves belong to the same click; and because a link's pose belongs to its joint chain, feedback that can only *show* a frame can never fight the kinematics |
 | ADR-026 | Depth policy belongs to the axes set, not to the scene: `Axes.AlwaysOnTop` (default false) makes the renderer queue that set's whole subtree during the ordinary walk and draw it last, on a depth buffer it has just cleared (one `glClear(GL_DEPTH_BUFFER_BIT)` per frame, skipped entirely when nothing was queued), while the corner gizmo keeps its own viewport and scissored clear. `GameObject.ShowLocalAxes` — and therefore `SceneGraph.Select` — creates its marker with the flag on; a `FixedWorldLength` ruler leaves it off | a per-object frame marker lives *inside* the mesh it annotates, so depth-testing it buries the very frame it exists to explain; but "the annotation always wins" cannot be a scene-wide rule either, because a ruler that shows through what it measures lies about the scene. Keeping the switch on the set (the same place its sizing policy lives — ADR-012) keeps the choice where the knowledge is: the renderer only reads it, and both kinds of axes set can coexist in one scene |
+| ADR-027 | Collision detection is a **geometry query**, not physics: Core provides shapes / broad phase / narrow phase / contact data, URDF collision maps onto link nodes, and `RobotCollisionModel` only does self-collision filtering; `MeshSink` can optionally turn reconstructed chunks into `MeshShape` (BVH rebuilt incrementally from `MeshData.Revision`); translucent collision fills use a dedicated `RenderPassKind.Debug` (unlit, blended, depth test off). No TSDF / Marching Cubes / dynamics / CCD / contact response | A rendering library's value is visualization and data access, not a solver; reconstruction, physics and planning belong to Open3D / PCL / FCL / Bullet / MuJoCo. Point clouds are not narrow-phase input (points have no inside/outside), so a reconstruction backend should emit a mesh or voxel collision proxy. The separate Debug pass keeps collision volumes visible without polluting product materials' transparency sorting |
 | ADR-025 | Scene structure changes commit at a **frame boundary**: `SceneGraph.Add` / `Remove` still apply immediately on the owner thread, while any other thread only enqueues into a `ConcurrentQueue`; the boundary `ApplyPendingChanges()` (called first by `Update` and by every `IRenderer.Render` implementation) folds the queue into `Roots` / `Lights` and publishes the monotonic `Version` plus `PendingChangeCount` (structural changes only: poses / joint values are still publish-then-read); `Remove` also clears a selection that pointed into the removed node, and structural changes after `Dispose` are ignored (with one warning); **write access is declared once** — the constructing thread is the owner, a host whose frame loop lives on another thread hands the scene over explicitly with `ClaimOwnership()` before the loop starts, and `ApplyPendingChanges()` no longer makes the caller the owner (on a thread that is not the owner it throws `InvalidOperationException`, because the frame boundary and "the thread allowed to walk `Roots`" have to stay one thread); the `Transform.Parent` back door joins the same queue (immediate on the owner thread and it keeps `Roots` membership in step, queued on any other thread) while `Transform.Children` becomes a read-only view; and the queue gains a `MaxPendingChanges` cap with `DroppedPendingChangeCount` (over-limit changes are dropped with one warning, so misuse is visible) | "adding objects while it renders" only ever *happened* to work (live traversal + lazy GPU upload) without being a contract: a cross-thread `Add` threw `Collection was modified` out of the render traversal, removing the selected node left a dangling selection, and lights past the shader cap were dropped silently. Gathering structural changes at a frame boundary writes the publish-then-hand-off rule into the code — producers only enqueue, rendering only walks a self-consistent snapshot — at the sole cost of "visible by the next frame at the latest", which is the same semantics as Unreal/Godot/Unity command queues, PhysX/Bevy double-buffered Extract, and rviz's `queueRender()`. The second half of ADR-025 came with the implementation: letting producers only enqueue settles "a producer cannot touch the lists" but not "who counts as a producer" — the old boundary made whoever called it the owner, so a single call from another thread flipped ownership and turned the previous owner (quite possibly mid-traversal) into an outsider, which made "who may write" a per-call answer. There is one answer per frame: the owner is fixed at construction and can be handed over explicitly, once, before the loop starts, and anything outside that throws instead of silently rerouting. The `Transform.Parent` setter broke the same rule through a back door (and left a node in both `Roots` and its parent, so `Remove` had to be called twice to be rid of it), so it joins the queue too; and the uncapped queue, which let "enqueue structure at data rate" go unnoticed, gained a cap and a drop counter |
 
 ---
@@ -155,7 +157,7 @@ producers: scene.Add / scene.Remove            update:  scene.Update(dt)
                                                      render:  renderer.Render(scene)
                                                                   ├─ frame boundary: ApplyPendingChanges()
                                                                   ├─ walk scene.Roots
-                                                                  ├─ dispatch by PassKind (Model/Line/Point/Axes)
+                                                                  ├─ dispatch by PassKind (Model/Line/Point/Axes/Debug)
                                                                   ├─ data→GPU resource cache/create (Mesh/Material/Texture/Shader)
                                                                   ├─ draw depth-tested (an AlwaysOnTop axes set is queued here, not drawn)
                                                                   ├─ overlay pass: clear the depth buffer → draw those sets (nothing can hide them)
@@ -184,7 +186,8 @@ producers: scene.Add / scene.Remove            update:  scene.Update(dt)
 | `RobotModel(RobotDescription, ...)` ctor | `Robot` | any description source (SDF/custom) → robot tree |
 | `IUpdateBehavior` / `GameObject.AddUpdate` | `Core.Scene` | inject per-frame logic (trajectory, animation) without a subclass; class-based logic via `AddBehavior<T>` |
 | `GameObject.Pickable` / pick `predicate` | `Core.Scene` | participate/filter picking |
-| `EmbeddedShaders` / `ShaderProgram` | `OpenGL.Resources` | custom/replace GLSL pipeline (model/line/point-cloud/axes) |
+| `GameObject.CollisionShapes` / `CollisionQuery` | `Core.Scene` / `Core.Geometry.Collision` | attach collision shapes and run geometry queries (broad/narrow phase); accepts reconstructed meshes or custom shapes |
+| `EmbeddedShaders` / `ShaderProgram` | `OpenGL.Resources` | custom/replace GLSL pipeline (model/line/point-cloud/axes/debug) |
 
 ---
 

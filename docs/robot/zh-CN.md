@@ -43,6 +43,7 @@ public RobotModel(RobotDescription description, IAssetResolver? resolver = null,
 | `DrivableJoints` | `IReadOnlyList<Joint>` | 可驱动关节（Revolute/Continuous/Prismatic，按描述顺序） |
 | `DrivableJointCount` | `int` | 可驱动关节数（`ApplyJointValues` 所需数组长度） |
 | `RootPose` | `Matrix4x4` | 机器人整体（根 link）在父坐标系位姿；经由内置接口写入 |
+| `CollisionModel` | `RobotCollisionModel` | URDF collision 构建的碰撞模型；自碰撞查询使用当前 link 世界位姿，自动跟随关节 |
 
 ### 方法
 
@@ -50,9 +51,20 @@ public RobotModel(RobotDescription description, IAssetResolver? resolver = null,
 public RobotState CreateState();                                  // headless 关节状态 + FK
 public void SetJointValue(string name, float value);              // 按名驱动（旋转弧度/平移米）并即时更新对应子 link 的本地 Transform
 public void ApplyJointValues(IReadOnlyList<float> values);         // 按可驱动顺序批量驱动
+public IReadOnlyList<CollisionContact> DetectSelfCollision(        // 非相邻 link 的碰撞查询
+    bool includeAdjacent = false,
+    Func<GameObject, GameObject, bool>? allowPair = null);
 ```
 
 > 关节只作用于 `Transform`（纯数据），从不触碰 OpenGL。构建完成后整棵子树被 `Transform` 只读锁定；子 link 位姿只能经 `RobotModel` 内置接口或 `RootPose` 写入，禁止外部直接改写。
+
+### 碰撞 / 自碰撞
+
+- `UrdfParser` 解析 `<link><collision>` 为 `CollisionElement`（origin + geometry）；`RobotModel` 把 collision geometry 挂到对应 link 骨架节点上，因此 link 随关节运动时碰撞体自动跟随。
+- collision mesh 与 visual mesh 共用按路径缓存的导入结果；碰撞网格加载失败只记警告并跳过该碰撞体，不阻断可视化。
+- `RobotCollisionModel.DetectSelfCollision` 默认跳过同一 link 和直接关节相邻的 link；`includeAdjacent` 或 `allowPair` 可放开。
+- 调试显示：`robot.CollisionModel.CreateDebugView()` 在每个 link 下挂半透明实体填充（`RenderPassKind.Debug`），随关节自动移动；`Dispose()` 移除。
+- 仍然只是几何查询：不做碰撞响应、动力学或接触求解。
 
 ### 使用示例
 
@@ -76,14 +88,15 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 2. 描述数据模型 / Description (`Description/`)
 
-> 命名空间 `RobotSimulation.Robot.Description`。纯数据、零渲染依赖、可序列化；只覆盖可视化相关信息，忽略物理参数（inertial、collision 等）。
+> 命名空间 `RobotSimulation.Robot.Description`。纯数据、零渲染依赖、可序列化；覆盖可视化与碰撞几何，忽略惯量等物理参数。
 
 - `RobotDescription`：`Name`（`<robot name>`）、`Links` / `Joints`（`List`，可变）、`RootLinks`（计算得出：没有被任何 joint 当作 child 的 link）、`FindLink(name)`。
-- `Link`：`Name`、`VisualElements`（`List<VisualElement>`，URDF 一个 link 可以有多个 visual）。
+- `Link`：`Name`、`VisualElements`（`List<VisualElement>`，URDF 一个 link 可以有多个 visual）、`CollisionElements`（`List<CollisionElement>`）。
+- `CollisionElement`：`Name`、`LocalTransform`、`Geometry`；↔ URDF `<collision>`，不解析材质/物理系数。
 - `VisualElement`：`LocalTransform`（行主序 `Matrix4x4`）、`Geometry`、可选 `Material`（`MaterialElement?`；为 null 即用渲染层默认外观）。
 - `MaterialElement`：`Name`、`Color`（`Vector4?`）、`TextureFile`（原始引用字符串）。
 - `Joint`：`Name`、`Type`、`ParentLinkName`、`ChildLinkName`、`Origin`（`Matrix4x4`）、`Axis`。
-  - `JointType`：`Fixed/Revolute/Continuous/Prismatic`。URDF 的 `planar` / `floating` 不在模型中，`limit` / `mimic` / `inertial` / `collision` 也不解析——只看可视化。
+  - `JointType`：`Fixed/Revolute/Continuous/Prismatic`。URDF 的 `planar` / `floating` 不在模型中，`limit` / `mimic` / `inertial` 也不解析；`collision` 解析为 `CollisionElement`。
   - joint 即「给定关节值 → 子 link 相对父 link 的变换」。revolute/continuous 绕 `Axis` 转角，prismatic 沿 `Axis` 平移，fixed 无自由度。
 - `GeometryElement` 基类（多态 record 联合类型；姿态由 `VisualElement` 持有，不在这一层）：
   - `BoxGeometry(Vector3 Size)`
@@ -96,7 +109,7 @@ Matrix4x4 ee = state.GetLinkGlobalPose("tool0");
 
 ## 3. URDF / (`Urdf/`)
 
-- `UrdfParser`（`internal`）：`RobotDescription Parse(XDocument document, string? baseDirectory)`。仅处理可视化：robot/link/visual/geometry/material/joint（拓扑）；显式忽略 inertial/collision/transmission/gazebo；位姿统一为行主序矩阵；数值以 `InvariantCulture` 解析。用户经 `RobotModel.Parse/ParseFile` 进入。
+- `UrdfParser`（`internal`）：`RobotDescription Parse(XDocument document, string? baseDirectory)`。处理 robot/link/visual/collision/geometry/material/joint（拓扑）；显式忽略 inertial/transmission/gazebo；位姿统一为行主序矩阵；数值以 `InvariantCulture` 解析。用户经 `RobotModel.Parse/ParseFile` 进入。
 - `UrdfParseException`（`public`）：解析失败时抛出，消息含元素/属性上下文以帮助定位文件。
 
 ### `IAssetResolver` / `FileSystemAssetResolver`

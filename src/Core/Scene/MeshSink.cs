@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
 using RobotSimulation.Core.Geometry;
+using RobotSimulation.Core.Geometry.Collision;
 
 namespace RobotSimulation.Core.Scene;
 
@@ -35,12 +36,48 @@ public sealed class MeshSink
     /// <param name="scene">Scene the chunk nodes are added to.</param>
     /// <param name="color">Base color of created chunk nodes; null uses <see cref="ChunkedMesh"/>'s default.</param>
     /// <param name="doubleSided">Whether created chunk nodes render double-sided (default true).</param>
+    /// <param name="enableCollision">
+    /// Whether created chunks also get a <see cref="MeshShape"/> for collision queries. Default false; a
+    /// reconstructed environment can turn it on without changing the producer protocol.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="scene"/> is null.</exception>
-    public MeshSink(SceneGraph scene, Vector4? color = null, bool doubleSided = true)
+    public MeshSink(SceneGraph scene, Vector4? color = null, bool doubleSided = true, bool enableCollision = false)
     {
         _scene = scene ?? throw new ArgumentNullException(nameof(scene));
         _color = color;
         _doubleSided = doubleSided;
+        EnableCollision = enableCollision;
+    }
+
+    /// <summary>Whether chunks receive a mesh collision shape (see <see cref="SetCollisionEnabled"/>).</summary>
+    public bool EnableCollision { get; private set; }
+
+    /// <summary>
+    /// Turns collision shapes for reconstructed chunks on or off on the scene owner thread. Enabling adds a
+    /// <see cref="MeshShape"/> to every existing chunk; disabling clears their collision shapes. The
+    /// producer-side protocol is unchanged.
+    /// </summary>
+    /// <param name="enabled">Whether chunks participate in collision queries.</param>
+    /// <exception cref="InvalidOperationException">Called from a thread other than the scene owner.</exception>
+    public void SetCollisionEnabled(bool enabled)
+    {
+        if (!_scene.IsOwnerThread)
+            throw new InvalidOperationException(
+                "MeshSink.SetCollisionEnabled must run on the scene owner thread (the frame-loop thread).");
+
+        EnableCollision = enabled;
+        foreach (ChunkedMesh node in _chunks.Values)
+        {
+            if (enabled)
+            {
+                if (node.CollisionShapes.Count == 0)
+                    node.AddCollisionShape(new MeshShape(node.Mesh));
+            }
+            else
+            {
+                node.ClearCollisionShapes();
+            }
+        }
     }
 
     /// <summary>Number of updates pushed but not yet applied (diagnostics).</summary>
@@ -92,6 +129,8 @@ public sealed class MeshSink
             if (!_chunks.TryGetValue(update.ChunkId, out ChunkedMesh? node))
             {
                 node = new ChunkedMesh(update.ChunkId, update.Origin, _color, _doubleSided);
+                if (EnableCollision)
+                    node.AddCollisionShape(new MeshShape(node.Mesh));
                 _chunks.Add(update.ChunkId, node);
                 _scene.Add(node);
                 node.Apply(update);

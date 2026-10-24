@@ -11,8 +11,8 @@
         <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
              the repo-root Directory.Build.props. -->
         <PackageId>RobotSimulation.Robot</PackageId>
-        <Description>Robot domain model for RobotSimulation: URDF parsing and pure-data description (RobotDescription / Link / Visual / Geometry / Joint), headless forward kinematics (RobotState), and the robot GameObject tree (RobotModel) with an extensible IAssetResolver for mesh and texture references.</Description>
-        <PackageTags>robot;urdf;forward-kinematics;kinematics;rviz;visualization;ros</PackageTags>
+        <Description>Robot domain model for RobotSimulation: URDF parsing and pure-data description (RobotDescription / Link / Visual / Collision / Geometry / Joint), headless forward kinematics (RobotState), robot self-collision, and the robot GameObject tree (RobotModel) with an extensible IAssetResolver for mesh and texture references.</Description>
+        <PackageTags>robot;urdf;forward-kinematics;kinematics;collision;self-collision;rviz;visualization;ros</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

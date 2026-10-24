@@ -21,6 +21,8 @@
 | `PointData` | `PointCloud2Data?` | 点云（配合 `RenderPassKind.Point`） |
 | `PointSize` | `float` | 点通道的像素尺寸（`GL_POINTS`），默认 3 |
 | `LineWidth` | `float` | 线通道的像素宽度（`GL_LINES`），默认 1。后端把每条线段扩成屏幕空间四边形，宽度在屏幕上恒定 |
+| `CollisionShapes` | `IReadOnlyList<CollisionShapeInstance>` | 挂在本节点上的碰撞形状（只读；经 `AddCollisionShape` 修改） |
+| `CollisionEnabled` | `bool` | 本节点及后代是否参与碰撞查询（子树开关，默认 true） |
 | `ShowLocalAxes` | `bool` | 是否挂载本节点局部坐标轴（自动子对象）。挂载出来的轴系带 `AlwaysOnTop`：这条标记所标注的节点，网格本身就在它四周，所以它在场景画完之后绘制，任何几何都埋不掉它 |
 | `LocalAxesLength` | `float` | 局部坐标轴默认长度，默认 0.3 |
 | `LocalAxes` | `Axes?` | 已挂载的局部坐标轴（非 null 当启用后；要微调就改这里——把 `AlwaysOnTop` 设回 false 又得到普通、会被遮挡的轴系） |
@@ -164,6 +166,19 @@ box.AddUpdate((go, dt) =>                       // 逻辑 = 一行 lambda，无�
 ### `Bounds`
 - 构造 `Bounds(Vector3 min, Vector3 max)`（不校验，调用方保证 `min <= max`）、`static Bounds FromPoints(IEnumerable<Vector3>)`（空集合得到 `Min = Max = 0` 的空盒）。
 - 属性 `Min` / `Max` / `Center` / `Size`。
+- 方法 `Intersects(in Bounds)`（接触算相交）、`Expanded(float)`、`Transformed(in Matrix4x4)`（变换八个角点得到保守世界 AABB）。
+
+### 碰撞检测（纯几何查询）
+命名空间 `RobotSimulation.Core.Geometry.Collision` / `RobotSimulation.Core.Scene`。只做几何查询，不做物理响应、积分或接触流形。
+
+- 形状：`BoxShape`（全尺寸）、`SphereShape`、`CapsuleShape`（`Length` 为中间圆柱段）、`CylinderShape`（窄相第一版按 Capsule 近似）、`MeshShape`（内部按 `MeshData.Revision` 惰性构建三角形 BVH）。
+- `CollisionShapeInstance(Shape, LocalPose)`：世界位姿为 `LocalPose * owner.Transform.GetModelMatrix()`。
+- `GameObject`：`CollisionShapes`（只读）、`CollisionEnabled`（子树开关）、`AddCollisionShape(shape, localPose?)`、`ClearCollisionShapes()`。
+- `CollisionQuery.TryGetContact(shapeA, worldA, shapeB, worldB, out ShapeContact)`：低层窄相；`ShapeContact` 含近似接触点、A→B 法线、穿透深度。
+- 缩放约定：Box/Mesh 使用完整世界矩阵；Sphere/Capsule/Cylinder 的半径取世界缩放的最大轴、Capsule/Cylinder 的长度取 Z 轴缩放。机器人 link 的 scale 恒为 1，不受影响。
+- `CollisionQuery.Detect(SceneGraph, predicate?)`：AABB 宽相 + 窄相，返回 `CollisionContact` 列表；在场景属主线程调用。
+- `MeshSink` 构造参数 `enableCollision` 与 `SetCollisionEnabled(bool)`：让增量重建的每个 chunk 自动获得 `MeshShape`，几何更新后由 revision 触发 BVH 重建。
+- `CollisionDebug`：Godot 风格半透明实体调试显示，使用 `RenderPassKind.Debug`；`CreateFill` / `CreateLocalFill` 生成体积，并给图元附带柔和线框描边（`DefaultColor` 低透明蓝灰填充 + `DefaultOutlineColor` 柔和蓝灰边），`CreateContactMarker` 生成法线标记。MeshShape 的填充直接绘制其网格，不额外描边。
 
 ### 点云 `PointCloud2Data` / `PointField` / `PointFieldDataType`
 ROS `sensor_msgs/PointCloud2` 风格：一个扁平字节缓冲 + 字段描述。每个点占 `PointStep` 字节，各通道（x/y/z/rgb/intensity）由 `PointField`（offset + datatype + count）定位。位置通道（x/y/z）必需；颜色可选，按 rgb/rgba → 单独 r/g/b → intensity（灰度）的优先级解析。
@@ -314,7 +329,7 @@ CPU 侧贴图引用，只描述「哪个文件、何种语义」，不持有 GPU
 - `enum TextureColorSpace { Srgb, Linear }`
 
 ### `RenderPassKind`
-`Model=0, Line=1, Point=2, Skybox=3, Axes=4`。`Core` 只定义「哪些通道存在」，各通道的 GLSL 实现由后端 `EmbeddedShaders` 提供。
+`Model=0, Line=1, Point=2, Skybox=3, Axes=4, Debug=5`。`Core` 只定义「哪些通道存在」，各通道的 GLSL 实现由后端 `EmbeddedShaders` 提供。`Debug` 是不受深度遮挡的半透明无光照填充，用于碰撞体等诊断显示。
 
 ---
 

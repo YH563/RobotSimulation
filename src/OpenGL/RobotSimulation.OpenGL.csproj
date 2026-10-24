@@ -12,8 +12,8 @@
         <!-- NuGet package identity. Shared metadata (version, authors, repository, README, symbols) lives in
              the repo-root Directory.Build.props. -->
         <PackageId>RobotSimulation.OpenGL</PackageId>
-        <Description>The OpenGL render backend for RobotSimulation: Silk.NET OpenGL device and context, mesh / material / texture upload, the built-in GLSL pipeline (model, line, point, skybox, axes) and the renderer. The only backend implementation; the host's own Silk.NET GL handle is what crosses the boundary (GraphicsFactory / GraphicsContext and the resource types uploaded through them), and every GL object below that line is owned here.</Description>
-        <PackageTags>robot;opengl;renderer;silk.net;shader;3d;visualization</PackageTags>
+        <Description>The OpenGL render backend for RobotSimulation: Silk.NET OpenGL device and context, mesh / material / texture upload, the built-in GLSL pipeline (model, line, point, skybox, axes, debug) and the renderer. The only backend implementation; the host's own Silk.NET GL handle is what crosses the boundary (GraphicsFactory / GraphicsContext and the resource types uploaded through them), and every GL object below that line is owned here.</Description>
+        <PackageTags>robot;opengl;renderer;silk.net;shader;collision-debug;3d;visualization</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

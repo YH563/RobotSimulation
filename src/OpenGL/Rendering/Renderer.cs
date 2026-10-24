@@ -96,6 +96,9 @@ public sealed class Renderer : IRenderer
     /// </summary>
     private readonly List<Axes> _overlayAxes = new();
 
+    /// <summary>Debug-fill nodes met during the current frame's walk; drawn translucent after the opaque scene.</summary>
+    private readonly List<GameObject> _debugNodes = new();
+
     private long _lastSweepFrame;
     private bool _disposed;
 
@@ -119,7 +122,7 @@ public sealed class Renderer : IRenderer
         _gl = device.NativeGl;
         _device = device;
 
-        // Compile all embedded standard pass shaders (Model/Line/Point/Skybox/Axes) — fail fast at startup
+        // Compile all embedded standard pass shaders (Model/Line/Point/Skybox/Axes/Debug) — fail fast at startup
         // rather than discovering a GLSL error mid-run; the host does not manage shader file paths.
         _passShaders = new Dictionary<RenderPassKind, ShaderProgram>();
         foreach (RenderPassKind pass in Enum.GetValues<RenderPassKind>())
@@ -244,14 +247,17 @@ public sealed class Renderer : IRenderer
 
         ApplyLightUniforms(colors, positions, directions, types, intensities, lightCount);
 
-        // The scene's own walk: every node is drawn here, depth-tested, except the axes sets that asked to be on
-        // top — those are queued for the overlay pass below, one frame after another re-using the same list.
+        // The scene's own walk: every node is drawn here, depth-tested, except the debug-fill nodes and the axes
+        // sets that asked to be on top — those are queued for the passes below, one frame after another re-using
+        // the same lists.
         _overlayAxes.Clear();
+        _debugNodes.Clear();
         foreach (GameObject root in scene.Roots)
             RenderNode(root, scene, view, projection);
 
-        // Then the on-top annotations, and only then the corner gizmo: the order is the stack the host sees, and
-        // the gizmo goes last so its own square is the topmost thing in the corner.
+        // Translucent debug volumes first: they annotate the opaque picture, and the on-top axes markers then
+        // land above them before the corner gizmo.
+        DrawDebugNodes(scene, view, projection);
         DrawOverlayAxes(scene, view, projection);
 
         // Last, so it lands on top of the finished picture rather than inside it (see the method for how its
@@ -357,6 +363,10 @@ public sealed class Renderer : IRenderer
                     DrawAxesNode(node, scene, view, projection);
                     break;
 
+                case RenderPassKind.Debug when !overlay && (node.MeshData != null || node.LineData != null):
+                    _debugNodes.Add(node);
+                    break;
+
                 // Skybox is a scene-level environment pass, not drawn by an ordinary node.
                 case RenderPassKind.Skybox:
                 default:
@@ -432,6 +442,66 @@ public sealed class Renderer : IRenderer
         shader.SetUniform("uColor", node.MaterialData!.BaseColor);
 
         GetOrCreateMesh(node.MeshData!).Draw();
+    }
+
+    /// <summary>
+    /// Draws the frame's <see cref="RenderPassKind.Debug"/> nodes: unlit, alpha-blended volumes over the finished
+    /// opaque picture. The depth test is off so a collision volume stays visible through the model it annotates;
+    /// depth writes are off as well, so the pass cannot disturb the overlay axes drawn after it. Blend order is
+    /// scene order, which is enough for diagnostics (this is not a transparency-sorted rendering mode).
+    /// </summary>
+    private void DrawDebugNodes(SceneGraph scene, Matrix4x4 view, Matrix4x4 projection)
+    {
+        if (_debugNodes.Count == 0)
+            return;
+
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.Disable(EnableCap.DepthTest);
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+
+        ShaderProgram fillShader = GetPassShader(RenderPassKind.Debug);
+        ShaderProgram lineShader = GetPassShader(RenderPassKind.Line);
+        (int viewportWidth, int viewportHeight) = _device.ViewportSize;
+
+        foreach (GameObject node in _debugNodes)
+        {
+            if (node.MeshData is { } meshData)
+            {
+                fillShader.Use();
+                fillShader.SetUniform("uModel", node.Transform.GetModelMatrix());
+                fillShader.SetUniform("uView", view);
+                fillShader.SetUniform("uProjection", projection);
+                fillShader.SetUniform("uColor", node.MaterialData!.BaseColor);
+                Mesh mesh = GetOrCreateMesh(meshData);
+                mesh.Sync(meshData);
+                mesh.Draw();
+                continue;
+            }
+
+            if (node.LineData is not { } lineData)
+                continue;
+
+            lineShader.Use();
+            lineShader.SetUniform("uModel", node.Transform.GetModelMatrix());
+            lineShader.SetUniform("uView", view);
+            lineShader.SetUniform("uProjection", projection);
+            lineShader.SetUniform("uColor", node.MaterialData!.BaseColor);
+            lineShader.SetUniform("uPerVertexColor", lineData.HasPerVertexColors ? 1 : 0);
+            lineShader.SetUniform("uViewportSize",
+                new Vector2(MathF.Max(1f, viewportWidth), MathF.Max(1f, viewportHeight)));
+            lineShader.SetUniform("uLineWidth", MathF.Max(1f, node.LineWidth));
+            lineShader.SetUniform("uNear", scene.Camera.NearPlane);
+            GetOrCreate(_lineCache, lineData, () => new LineMesh(_gl, lineData)).Draw();
+        }
+
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.CullFace);
+        _debugNodes.Clear();
     }
 
     /// <summary>
