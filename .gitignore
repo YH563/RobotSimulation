@@ -8,3 +8,4 @@ artifacts/
 *.DotSettings.user
 .vs/
 .vscode/
+ROADMAP.local.md
