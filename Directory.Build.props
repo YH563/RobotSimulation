@@ -17,8 +17,8 @@
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
         <!-- Single source of truth for the three package versions and the v<version> release tag. Bump this
-             and commit; the publish workflow auto-creates / pushes the annotated tag if it is still missing,
-             so a forgotten `git push origin v<version>` no longer strands a release at the last job. -->
+             and add the matching bilingual section to CHANGELOG.md; the publish workflow validates that
+             section, uses it for the GitHub Release, and auto-creates / pushes the tag if it is still missing. -->
         <Version>0.5.1</Version>
 
         <Authors>YH563</Authors>

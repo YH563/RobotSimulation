@@ -163,6 +163,7 @@ Fully split into Chinese / English, per module **and** for this index itself —
 | [`docs/robot/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/robot/en.md) | `RobotSimulation.Robot` public API reference (RobotModel / Description / Urdf / State) |
 | [`docs/opengl/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/opengl/en.md) | `RobotSimulation.OpenGL` public API + host composition + custom shader pipeline |
 | [`docs/testing/en.md`](https://github.com/YH563/RobotSimulation/blob/master/docs/testing/en.md) | Test data guide: what the host tests load, where the files come from (incl. regenerating the samples and optional downloads) |
+| [`CHANGELOG.md`](https://github.com/YH563/RobotSimulation/blob/master/CHANGELOG.md) | Bilingual release history (from 0.1.0) |
 
 ## 6. Conventions
 

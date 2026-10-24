@@ -1,0 +1,65 @@
+name: sync-release-notes
+
+# One-time / occasional maintenance: rewrite every GitHub Release body from the matching
+# CHANGELOG.md section. Run manually from Actions -> sync-release-notes -> Run workflow.
+# It can also create a release for a tag that has no release yet (e.g. v0.1.0).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Sync GitHub Releases from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          versions="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md)"
+          if [ -z "$versions" ]; then
+            echo "::error::CHANGELOG.md 里没有找到任何 x.y.z 版本章节。"
+            exit 1
+          fi
+
+          for version in $versions; do
+            tag="v$version"
+            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::warning::$tag 不存在，跳过。"
+              continue
+            fi
+
+            notes="$(mktemp)"
+            awk -v ver="$version" '
+              /^## \[/ {
+                if (in_section) exit
+                if (index($0, "[" ver "]") > 0) in_section = 1
+              }
+              in_section { print }
+            ' CHANGELOG.md >"$notes"
+
+            if [ ! -s "$notes" ]; then
+              echo "::warning::CHANGELOG.md 缺少 [$version] 章节，跳过 $tag。"
+              continue
+            fi
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Updating Release $tag"
+              gh release edit "$tag" --title "RobotSimulation $version" --notes-file "$notes"
+            else
+              echo "Creating Release $tag"
+              gh release create "$tag" --title "RobotSimulation $version" --verify-tag --notes-file "$notes"
+            fi
+          done
+
+          gh release list --limit 20

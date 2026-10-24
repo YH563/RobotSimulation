@@ -162,6 +162,7 @@ dotnet run --project Tests/AvaloniaTest
 | [`docs/robot/zh-CN.md`](docs/robot/zh-CN.md) | `RobotSimulation.Robot` 公共 API 参考（RobotModel / Description / Urdf / State） |
 | [`docs/opengl/zh-CN.md`](docs/opengl/zh-CN.md) | `RobotSimulation.OpenGL` 公共 API + 宿主组装 + 自定义着色管线 |
 | [`docs/testing/zh-CN.md`](docs/testing/zh-CN.md) | 测试数据指南：宿主测试加载什么、文件从哪里来（含样本重新生成与可选的下载清单） |
+| [`CHANGELOG.md`](CHANGELOG.md) | 中英双语版本更新日志（0.1.0 起） |
 
 ## 6. 约定与约定俗成 / Conventions
 

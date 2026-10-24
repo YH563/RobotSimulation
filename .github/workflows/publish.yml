@@ -14,11 +14,12 @@ name: publish
 #   2) 本仓库 Settings → Secrets and variables → Actions → New repository secret：
 #        NUGET_USER = 你的 nuget.org 用户名（不是邮箱；不想用 secret 也可直接把它写进下面的 user:）
 #
-# 发布新版本：只改 Directory.Build.props 里的 <Version> 并提交（版本号只有这一个来源），再到 Actions
-# 页面 Run workflow 即可。若远端还没有 v<version> tag，release job 会按本次运行的提交自动创建带注解 tag
-# 并推送，然后建 / 更新对应的 GitHub Release（见文件末尾；它只拿到 contents: write，推包那步仍然只有
-# contents: read）。想手写 Release 说明，仍可先手动 git tag -a / git push origin <tag>，workflow 会沿用它。
-# 一次运行做两件事：推三个包到 nuget.org（publish job），再按 tag 注解建 / 更新 GitHub Release。
+# 发布新版本：改 Directory.Build.props 里的 <Version>，并在 CHANGELOG.md 写好该版本的
+# “### 中文 / ### English”章节，然后到 Actions 页面 Run workflow。publish job 缺少 changelog
+# 章节会直接失败；release job 会把同一段内容写进 tag 注解和 GitHub Release。若远端还没有
+# v<version> tag，release job 会按本次运行的提交自动创建带注解 tag 并推送，然后建 / 更新 Release
+# （见文件末尾；它只拿到 contents: write，推包那步仍然只有 contents: read）。
+# 一次运行做两件事：推三个包到 nuget.org（publish job），再按 CHANGELOG.md 建 / 更新 GitHub Release。
 on:
   workflow_dispatch:
   # 想改成「推 tag 自动发布」就取消下面注释。注意：部分平台的 OIDC ref claim 不接受 tag，
@@ -53,6 +54,33 @@ jobs:
 
       - name: Restore
         run: dotnet restore RobotSimulation.sln
+
+      - name: Verify CHANGELOG.md has this version
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error::Directory.Build.props 里没读到 <Version>。"
+            exit 1
+          fi
+
+          section="$(awk -v ver="$version" '
+            /^## \[/ {
+              if (in_section) exit
+              if (index($0, "[" ver "]") > 0) in_section = 1
+            }
+            in_section { print }
+          ' CHANGELOG.md)"
+
+          if [ -z "$section" ]; then
+            echo "::error::CHANGELOG.md 缺少 [$version] 章节；发布说明来自该章节（中英双语），请先补齐再发布。"
+            exit 1
+          fi
+          if ! grep -Fq "### 中文" <<<"$section" || ! grep -Fq "### English" <<<"$section"; then
+            echo "::error::CHANGELOG.md 的 [$version] 章节必须同时包含 '### 中文' 和 '### English'。"
+            exit 1
+          fi
+          echo "CHANGELOG.md [$version] 中英双语章节检查通过。"
 
       - name: Build
         run: dotnet build RobotSimulation.sln -c Release --no-restore
@@ -217,14 +245,34 @@ jobs:
           tag="v$version"
           echo "版本 $version -> tag $tag"
 
+          # Release notes 的唯一来源是 CHANGELOG.md 里当前版本的中英双语章节。publish job 已经
+          # 验证过该章节存在；这里再提取一次，同时用于 tag 注解和 GitHub Release。
+          notes="$(mktemp)"
+          awk -v ver="$version" '
+            /^## \[/ {
+              if (in_section) exit
+              if (index($0, "[" ver "]") > 0) in_section = 1
+            }
+            in_section { print }
+          ' CHANGELOG.md >"$notes"
+          if [ ! -s "$notes" ]; then
+            echo "::error::CHANGELOG.md 缺少 [$version] 章节，无法生成 Release notes。"
+            exit 1
+          fi
+
           # 忘记推 tag 不该让整个发布停在最后一步：远端缺少 tag 时，按本次运行的提交自动创建带注解
-          # tag 并推送。tag 的标题是版本号，正文沿用当前提交说明；想自定义 Release notes 仍可先手动
-          # 创建并推送 tag，下面的检查会直接沿用它。
+          # tag 并推送。tag 的标题是版本号，正文使用同一段 CHANGELOG.md 内容。
           if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "::notice::本地没有 tag $tag，按 $GITHUB_SHA 自动创建。"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$tag" -m "RobotSimulation $version" -m "$(git log -1 --pretty=%B)"
+            tag_message="$(mktemp)"
+            {
+              echo "RobotSimulation $version"
+              echo
+              cat "$notes"
+            } >"$tag_message"
+            git tag -a "$tag" -F "$tag_message"
           fi
 
           if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
@@ -239,19 +287,7 @@ jobs:
             echo "::warning::tag $tag 指向 $tag_sha，本次运行的是 $GITHUB_SHA，两者不同，请确认是否符合预期。"
           fi
 
-          # 正文 = tag 注解去掉第一行（第一行当标题），与手工发布的排版保持一致。
-          # 注意：轻量 tag 上没有注解，git 会把提交信息当正文读出来，所以先判类型，别静默用错东西。
-          notes="$(mktemp)"
-          args=()
-          if [ "$(git cat-file -t "$tag")" = tag ]; then
-            git tag -l --format='%(contents:body)' "$tag" >"$notes"
-          fi
-          if [ -s "$notes" ]; then
-            args+=(--notes-file "$notes")
-          else
-            echo "::warning::tag $tag 不是带注解的 tag（或注解没有正文），改用 GitHub 自动生成的 release notes；想自己写排版请用 git tag -a $tag。"
-            args+=(--generate-notes)
-          fi
+          args=(--notes-file "$notes")
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag 已存在，更新标题与正文。"
